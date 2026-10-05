@@ -499,7 +499,7 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
 
 
     addon_name = ADDON_NAME
-    addon_desc = "ESTRENOS 2026 - Peliculas y Series en Espanol Latino e idioma original - 1080p WEB-DL"
+    addon_desc = "Peliculas y Series en Español Latino | 1080p"
     addon_version = ADDON_VERSION
 
     #----- Show expiry info in the addon: token's own expiry first, else the subscription
