@@ -31,7 +31,7 @@ router = APIRouter(prefix="/stremio", tags=["Stremio Addon"])
 templates = Jinja2Templates(directory="Backend/fastapi/templates")
 
 #----- Addon configuration
-ADDON_NAME = "Telegram"
+ADDON_NAME = "Nube Latino"
 ADDON_VERSION = __version__
 PAGE_SIZE = 15
 
@@ -499,7 +499,7 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
 
 
     addon_name = ADDON_NAME
-    addon_desc = "Streams movies and series from your Telegram."
+    addon_desc = "ESTRENOS 2026 - Peliculas y Series en Espanol Latino e idioma original - 1080p WEB-DL"
     addon_version = ADDON_VERSION
 
     #----- Show expiry info in the addon: token's own expiry first, else the subscription
@@ -527,7 +527,7 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
         "id": f"telegram.media.{token[:8]}",
         "version": addon_version,
         "name": addon_name,
-        "logo": "https://i.postimg.cc/XqWnmDXr/Picsart-25-10-09-08-09-45-867.png",
+        "logo": "https://i.postimg.cc/FKbJzmNg/logo-addon.png",
         "description": addon_desc,
         "types": ["movie", "series"],
         "resources": resources,
