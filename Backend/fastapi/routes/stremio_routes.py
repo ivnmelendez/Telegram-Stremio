@@ -310,38 +310,37 @@ def format_released_date(media):
 
 
 #----- Build a Stremio stream display name/title from a filename
-def format_stream_details(filename: str, quality: str, size: str, is_split: bool = False) -> tuple[str, str]:
-    size_emoji = "📦" if is_split else "💾"
+#----- PTN labels some sources with names that don't match common release tags
+QUALITY_LABEL_OVERRIDES = {"Telesync": "HDTS", "WEBRip": "WEB-RIP"}
+
+
+def format_stream_details(filename: str, quality: str, size: str, is_split: bool = False) -> tuple[str, str, str]:
     try:
         parsed = PTN.parse(filename)
     except Exception:
-        return (f"Telegram {quality}", f"📁 {filename}\n{size_emoji} {size}")
-
-    codec_parts = []
-    if parsed.get("codec"):
-        codec_parts.append(f"🎥 {parsed.get('codec')}")
-    if parsed.get("bitDepth"):
-        codec_parts.append(f"🌈 {parsed.get('bitDepth')}bit")
-    if parsed.get("audio"):
-        codec_parts.append(f"🔊 {parsed.get('audio')}")
-    if parsed.get("encoder"):
-        codec_parts.append(f"👤 {parsed.get('encoder')}")
-
-    codec_info = " ".join(codec_parts) if codec_parts else ""
+        parsed = {}
 
     resolution = parsed.get("resolution", quality)
     quality_type = parsed.get("quality", "")
-    stream_name = f"Telegram {resolution} {quality_type}".strip()
+    quality_type = QUALITY_LABEL_OVERRIDES.get(quality_type, quality_type)
+    quality_line = " | ".join(p for p in [resolution, quality_type] if p)
 
-    stream_title_parts = [
-        f"📁 {filename}",
-        f"{size_emoji} {size}",
-    ]
-    if codec_info:
-        stream_title_parts.append(codec_info)
+    stream_name = "Stream"
+    stream_title = "\n".join([
+        "Nube Latino",
+        quality_line,
+        "Via Premium ☁️",
+    ])
+    return (stream_name, stream_title, quality_line)
 
-    stream_title = "\n".join(stream_title_parts)
-    return (stream_name, stream_title)
+
+#----- Append an extra tag (e.g. episode range, link type) onto the quality line of a stream_title
+def _tag_stream_title(stream_title: str, tag: str | None) -> str:
+    if not tag:
+        return stream_title
+    lines = stream_title.split("\n")
+    lines[1] = f"{lines[1]} | {tag}".strip(" |")
+    return "\n".join(lines)
 
 
 def parse_size_to_bytes(size_str: str) -> int:
@@ -787,7 +786,7 @@ def _streams_from_global_results(token: str, global_results: list) -> list:
     streams = []
     for r in global_results:
         is_split = bool(r.get("is_split"))
-        _, stream_title = format_stream_details(r["title"], r["quality"], r["size"], is_split=is_split)
+        _, stream_title, _ = format_stream_details(r["title"], r["quality"], r["size"], is_split=is_split)
         stream_name = f"🌐 GLOBAL {r['quality']}"
         stream_title = f"{stream_title}\n📡 {r['source_chat']}"
         if is_split:
@@ -1062,14 +1061,13 @@ async def get_streams(
                 episode_start = combined.get("start") or 0 if combined else 0
                 name_key = combined_name_key(filename) if combined else ""
 
-                stream_name, stream_title = format_stream_details(
+                stream_name, stream_title, quality_sort = format_stream_details(
                     filename, quality_str, size, is_split=bool(quality.get("group_key"))
                 )
 
                 if combined:
                     label = "Full" if combined.get("start") is None else f"E{combined['start']:02d}-E{combined['end']:02d}"
-                    if label.lower() not in stream_name.lower():
-                        stream_name = f"{stream_name} {label}"
+                    stream_title = _tag_stream_title(stream_title, label)
 
                 original_url = f"{SettingsManager.current().base_url}/dl/{token}/{quality.get('id')}/video.mkv"
                 proxy_url = build_proxy_url(original_url)
@@ -1077,15 +1075,16 @@ async def get_streams(
                 cf_only = cf_url and SettingsManager.current().cf_stream_mode == "cloudflare"
 
                 if cf_url:
-                    streams.append({"name": stream_name if cf_only else f"{stream_name} (Cloudflare)", "title": stream_title, "url": cf_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key})
+                    cf_title = stream_title if cf_only else _tag_stream_title(stream_title, "Cloudflare")
+                    streams.append({"name": stream_name, "title": cf_title, "url": cf_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key, "quality_sort": quality_sort})
                 if not cf_only:
                     if SettingsManager.current().show_proxy_and_non_proxy_both and proxy_url:
-                        streams.append({"name": f"{stream_name} (Proxy)", "title": stream_title, "url": proxy_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key})
-                        streams.append({"name": f"{stream_name} (Direct)", "title": stream_title, "url": original_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key})
+                        streams.append({"name": stream_name, "title": _tag_stream_title(stream_title, "Proxy"), "url": proxy_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key, "quality_sort": quality_sort})
+                        streams.append({"name": stream_name, "title": _tag_stream_title(stream_title, "Direct"), "url": original_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key, "quality_sort": quality_sort})
                     elif proxy_url:
-                        streams.append({"name": stream_name, "title": stream_title, "url": proxy_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key})
+                        streams.append({"name": stream_name, "title": stream_title, "url": proxy_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key, "quality_sort": quality_sort})
                     else:
-                        streams.append({"name": stream_name, "title": stream_title, "url": original_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key})
+                        streams.append({"name": stream_name, "title": stream_title, "url": original_url, "size_bytes": size_bytes, "episode_start": episode_start, "name_key": name_key, "quality_sort": quality_sort})
     elif is_global_search_enabled():
         try:
             is_anime = bool(is_kitsu or (media_details and media_details.get("is_anime")))
@@ -1110,7 +1109,7 @@ async def get_streams(
     config = token_data.get("config") or {}
     quality_filter = set(config.get("quality_filter") or [])
     if quality_filter and streams:
-        filtered = [s for s in streams if stream_res_label(s.get("name", "")) in quality_filter]
+        filtered = [s for s in streams if stream_res_label(s.get("quality_sort") or s.get("name", "")) in quality_filter]
         if filtered:
             streams = filtered
 
@@ -1121,21 +1120,23 @@ async def get_streams(
     if is_combined:
         streams.sort(key=lambda s: s.get("episode_start", 0))
         streams.sort(key=lambda s: s.get("name_key", ""))
-        streams.sort(key=lambda s: get_resolution_priority(s.get("name", "")), reverse=not ascending)
+        streams.sort(key=lambda s: get_resolution_priority(s.get("quality_sort") or s.get("name", "")), reverse=not ascending)
     else:
         streams.sort(
-            key=lambda s: (get_resolution_priority(s.get("name", "")), s.get("size_bytes", 0)),
+            key=lambda s: (get_resolution_priority(s.get("quality_sort") or s.get("name", "")), s.get("size_bytes", 0)),
             reverse=not ascending
         )
+    dedupe_key = lambda s: s.get("quality_sort") or s["name"]
     name_count: dict = {}
     for s in streams:
-        name_count[s["name"]] = name_count.get(s["name"], 0) + 1
+        name_count[dedupe_key(s)] = name_count.get(dedupe_key(s), 0) + 1
 
     seen: dict = {}
     for s in streams:
-        if name_count[s["name"]] > 1:
-            seen[s["name"]] = seen.get(s["name"], 0) + 1
-            s["name"] = f"{s['name']} ({seen[s['name']]})"
+        key = dedupe_key(s)
+        if name_count[key] > 1:
+            seen[key] = seen.get(key, 0) + 1
+            s["name"] = f"{s['name']} ({seen[key]})"
     return {"streams": streams}
 
 #----- Configure/install landing page rendered as HTML for a token
