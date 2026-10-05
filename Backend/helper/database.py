@@ -168,6 +168,18 @@ class Database:
         )
         return True
 
+    async def get_default_catalog_overrides(self) -> dict:
+        doc = await self.dbs["tracking"]["state"].find_one({"_id": "default_catalog_overrides"})
+        return dict((doc or {}).get("overrides", {}))
+
+    async def save_default_catalog_overrides(self, overrides: dict) -> bool:
+        await self.dbs["tracking"]["state"].update_one(
+            {"_id": "default_catalog_overrides"},
+            {"$set": {"overrides": overrides or {}}},
+            upsert=True,
+        )
+        return True
+
 
 
     async def connect_storage_db(self, uri: str, index: int) -> bool:

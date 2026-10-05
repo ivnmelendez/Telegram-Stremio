@@ -430,6 +430,21 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
         ]
 
         try:
+            default_overrides = await db.get_default_catalog_overrides()
+            if default_overrides:
+                kept = []
+                for c in catalogs:
+                    ov = default_overrides.get(c["id"]) or {}
+                    if not ov.get("enabled", True):
+                        continue
+                    if ov.get("name"):
+                        c["name"] = ov["name"]
+                    kept.append(c)
+                catalogs = kept
+        except Exception:
+            pass
+
+        try:
             custom_catalogs = await db.get_custom_catalogs()
             for catalog in custom_catalogs:
                 visible_items = [
@@ -1210,6 +1225,20 @@ async def _addon_catalogs_for_token(token_data: dict) -> list:
         {"id": "latest_series", "name": "Latest Series", "type": "series"},
         {"id": "top_series", "name": "Popular Series", "type": "series"},
     ]
+    try:
+        default_overrides = await db.get_default_catalog_overrides()
+        if default_overrides:
+            kept = []
+            for e in entries:
+                ov = default_overrides.get(e["id"]) or {}
+                if not ov.get("enabled", True):
+                    continue
+                if ov.get("name"):
+                    e["name"] = ov["name"]
+                kept.append(e)
+            entries = kept
+    except Exception:
+        pass
     try:
         for c in await db.get_custom_catalogs():
             items = [i for i in (c.get("items") or []) if _token_can_view(*_effective_visibility(c, i), token_data)]

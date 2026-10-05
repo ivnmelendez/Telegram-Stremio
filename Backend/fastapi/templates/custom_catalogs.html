@@ -1077,26 +1077,73 @@ async function loadCatalogOrder() {
 
 const ORDER_GROUP_CLASS = { 'Default Movies': 'vis-tokens', 'Default TV': 'vis-tokens', 'Auto': 'vis-public', 'Custom': 'vis-owner' };
 
+function isDefaultCatalogGroup(group) {
+  return group === 'Default Movies' || group === 'Default TV';
+}
+
 function renderCatalogOrder() {
   const box = document.getElementById('catalog-order-list');
   if (!catalogOrder.length) { box.innerHTML = emptyState('📚', 'No catalogs', 'Create catalogs to reorder them.'); return; }
   box.innerHTML = catalogOrder.map((e, i) => {
     const typeLabel = e.type === 'series' ? '📺 TV' : '🎬 Movie';
-    return `<div class="order-row">
+    const isDefault = isDefaultCatalogGroup(e.group);
+    const disabled = isDefault && e.enabled === false;
+    const defaultControls = isDefault ? `
+      <button class="order-arrow" title="Rename" onclick="renameDefaultCatalog('${e.id}', '${escapeHtml(e.name).replace(/'/g, "\\'")}')">✎</button>
+      <label class="flex items-center gap-1 text-xs muted" title="Show in Stremio">
+        <input type="checkbox" ${disabled ? '' : 'checked'} onchange="toggleDefaultCatalog('${e.id}', this.checked)">
+      </label>` : '';
+    return `<div class="order-row" style="${disabled ? 'opacity:.5' : ''}">
       <span class="drag-idx">${i + 1}</span>
       <span class="min-w-0 flex-1">
-        <span class="font-black truncate block">${escapeHtml(e.name)}</span>
+        <span class="font-black truncate block">${escapeHtml(e.name)}${disabled ? ' (hidden)' : ''}</span>
         <span class="flex items-center gap-2 mt-1">
           <span class="vis-chip ${ORDER_GROUP_CLASS[e.group] || 'vis-tokens'}">${escapeHtml(e.group)}</span>
           <span class="muted text-xs">${typeLabel}</span>
         </span>
       </span>
-      <span class="flex flex-col gap-1">
-        <button class="order-arrow" ${i === 0 ? 'disabled' : ''} onclick="moveCatalogOrder(${i}, -1)">▲</button>
-        <button class="order-arrow" ${i === catalogOrder.length - 1 ? 'disabled' : ''} onclick="moveCatalogOrder(${i}, 1)">▼</button>
+      <span class="flex items-center gap-1">
+        ${defaultControls}
+        <span class="flex flex-col gap-1">
+          <button class="order-arrow" ${i === 0 ? 'disabled' : ''} onclick="moveCatalogOrder(${i}, -1)">▲</button>
+          <button class="order-arrow" ${i === catalogOrder.length - 1 ? 'disabled' : ''} onclick="moveCatalogOrder(${i}, 1)">▼</button>
+        </span>
       </span>
     </div>`;
   }).join('');
+}
+
+async function saveDefaultCatalogOverride(id, patch) {
+  try {
+    const res = await fetch('/api/default-catalogs');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || 'Failed to load default catalog settings');
+    const overrides = data.overrides || {};
+    overrides[id] = Object.assign({}, overrides[id], patch);
+    const res2 = await fetch('/api/default-catalogs', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overrides })
+    });
+    const data2 = await res2.json().catch(() => ({}));
+    if (!res2.ok) throw new Error(data2.detail || 'Failed to save');
+    showToast('Saved.', 'success', 'Default catalogs');
+  } catch (error) {
+    showToast(error.message || 'Failed to save', 'error', 'Error');
+  } finally {
+    await loadCatalogOrder();
+  }
+}
+
+function toggleDefaultCatalog(id, enabled) {
+  saveDefaultCatalogOverride(id, { enabled });
+}
+
+function renameDefaultCatalog(id, currentName) {
+  const name = prompt('New name for this catalog:', currentName);
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  saveDefaultCatalogOverride(id, { name: trimmed });
 }
 
 function moveCatalogOrder(i, dir) {

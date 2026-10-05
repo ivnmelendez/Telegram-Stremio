@@ -47,6 +47,8 @@ from Backend.fastapi.routes.api_routes import (
     get_auto_catalog_settings_api,
     get_catalog_order_api,
     update_catalog_order_api,
+    get_default_catalog_overrides_api,
+    update_default_catalog_overrides_api,
     get_user_activity_api,
     session_send_code_api,
     session_verify_code_api,
@@ -643,6 +645,14 @@ async def get_catalog_order_route(_: bool = Depends(require_auth)):
 @app.put("/api/custom-catalogs-order")
 async def update_catalog_order_route(payload: dict, _: bool = Depends(require_auth)):
     return await update_catalog_order_api(payload)
+
+@app.get("/api/default-catalogs")
+async def get_default_catalogs_route(_: bool = Depends(require_auth)):
+    return await get_default_catalog_overrides_api()
+
+@app.put("/api/default-catalogs")
+async def update_default_catalogs_route(payload: dict, _: bool = Depends(require_auth)):
+    return await update_default_catalog_overrides_api(payload)
 
 @app.get("/api/custom-catalogs/auto-sync/settings")
 async def get_auto_catalog_settings_route(_: bool = Depends(require_auth)):

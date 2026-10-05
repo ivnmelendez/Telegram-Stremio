@@ -1639,10 +1639,46 @@ _DEFAULT_CATALOG_ENTRIES = [
 ]
 
 
+async def get_default_catalog_overrides_api():
+    try:
+        return {"overrides": await db.get_default_catalog_overrides()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def update_default_catalog_overrides_api(payload: dict):
+    overrides = payload.get("overrides")
+    if not isinstance(overrides, dict):
+        raise HTTPException(status_code=400, detail="overrides must be an object.")
+    clean = {}
+    for cid, ov in overrides.items():
+        if not isinstance(ov, dict):
+            continue
+        entry = {}
+        name = ov.get("name")
+        if isinstance(name, str) and name.strip():
+            entry["name"] = name.strip()[:60]
+        entry["enabled"] = bool(ov.get("enabled", True))
+        clean[str(cid)] = entry
+    try:
+        await db.save_default_catalog_overrides(clean)
+        return {"ok": True, "message": "Default catalog settings saved.", "overrides": clean}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def get_catalog_order_api():
     try:
         catalogs = await db.get_custom_catalogs()
-        entries = [dict(e) for e in _DEFAULT_CATALOG_ENTRIES]
+        overrides = await db.get_default_catalog_overrides()
+        entries = []
+        for e in _DEFAULT_CATALOG_ENTRIES:
+            e = dict(e)
+            ov = overrides.get(e["id"]) or {}
+            if ov.get("name"):
+                e["name"] = ov["name"]
+            e["enabled"] = ov.get("enabled", True)
+            entries.append(e)
         for c in catalogs:
             items = c.get("items") or []
             cid = f"custom_{c['_id']}"
