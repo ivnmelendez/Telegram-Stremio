@@ -151,12 +151,25 @@ async def list_media_api(
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=100),
     search: str = Query("", max_length=100),
-    custom: bool = Query(False)
+    custom: bool = Query(False),
+    imdb_id: str = Query("", max_length=20)
 ):
     try:
         key = "movies" if media_type == "movie" else "tv_shows"
         #----- Custom (manually added) titles carry a negative synthetic tmdb_id
         extra_filter = {"tmdb_id": {"$lt": 0}} if custom else None
+        if imdb_id:
+            #----- Indexed exact lookup, used by external tools matching by imdb_id
+            doc = await db.find_by_imdb_id(imdb_id, media_type)
+            items = [doc] if doc and (not custom or int(doc.get("tmdb_id") or 0) < 0) else []
+            resp = {
+                "total_count": len(items),
+                "current_page": 1,
+                "total_pages": 1 if items else 0,
+                key: items,
+            }
+            _resolve_covers(resp.get(key))
+            return resp
         if search:
             result = await db.search_documents(search, page, page_size)
             filtered_results = [

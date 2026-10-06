@@ -1779,8 +1779,25 @@ class Database:
             }
 
 
+    #----- Indexed exact lookup by imdb_id (fast, unlike the regex title search)
+    async def find_by_imdb_id(self, imdb_id: str, media_type: str) -> Optional[dict]:
+        collection_name = "movie" if media_type == "movie" else "tv"
+        projection = {
+            "_id": 1, "tmdb_id": 1, "title": 1, "imdb_id": 1,
+            "release_year": 1, "poster": 1, "media_type": 1, "db_index": 1,
+        }
+        for db_idx in range(self.current_db_index, 0, -1):
+            db_key = f"storage_{db_idx}"
+            doc = await self.dbs[db_key][collection_name].find_one({"imdb_id": imdb_id}, projection)
+            if doc:
+                doc = convert_objectid_to_str(doc)
+                doc["media_type"] = media_type
+                doc["db_index"] = db_idx
+                return doc
+        return None
+
     async def get_media_details(
-        self, 
+        self,
         imdb_id: str = None,
         season_number: Optional[int] = None, 
         episode_number: Optional[int] = None,
