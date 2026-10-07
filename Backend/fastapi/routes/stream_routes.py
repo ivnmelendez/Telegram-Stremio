@@ -34,6 +34,17 @@ from Backend.pyrofork.bot import (
 
 router = APIRouter(tags=["Streaming"])
 
+#----- Python's mimetypes module reads the OS's /etc/mime.types, which on minimal
+#----- container images (unlike most desktop OSes) often lacks common video formats —
+#----- register them explicitly so guess_type() doesn't silently fall back to
+#----- application/octet-stream regardless of host environment.
+for _ext, _mime in (
+    (".mkv", "video/x-matroska"), (".mp4", "video/mp4"), (".avi", "video/x-msvideo"),
+    (".mov", "video/quicktime"), (".webm", "video/webm"), (".wmv", "video/x-ms-wmv"),
+    (".flv", "video/x-flv"), (".m4v", "video/x-m4v"), (".ts", "video/mp2t"),
+):
+    mimetypes.add_type(_mime, _ext)
+
 _streamer_by_client: Dict = {}
 _rr_counter: int = 0
 
