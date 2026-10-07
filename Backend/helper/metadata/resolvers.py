@@ -60,6 +60,15 @@ async def resolve_movie(
             if detail:
                 sim = title_similarity(title, detail.get("title", ""))
                 if sim >= CINEMETA_THRESHOLD or explicit_imdb:
+                    #----- Cinemeta has no locale (always English). Same imdb_id might
+                    #----- still be on TMDB (es-MX) even though the earlier title search
+                    #----- missed it - prefer that for a Spanish payload before falling
+                    #----- back to Cinemeta's English one.
+                    es_item = await tmdb.spanish_title_by_imdb(imdb_id, "movie")
+                    if es_item:
+                        movie = await tmdb.details("movie", es_item.id)
+                        if movie:
+                            return tmdb.build_movie_payload(movie, quality, encoded_string)
                     return cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
                 LOGGER.info(
                     f"[MOVIE] Cinemeta title mismatch for '{title}': "
@@ -125,6 +134,15 @@ async def resolve_series(
             if detail:
                 sim = title_similarity(title, detail.get("title", ""))
                 if sim >= CINEMETA_THRESHOLD or explicit_imdb:
+                    #----- Same reasoning as resolve_movie: prefer a Spanish TMDB
+                    #----- payload over Cinemeta's English one when both know this
+                    #----- imdb_id.
+                    es_item = await tmdb.spanish_title_by_imdb(imdb_id, "tv")
+                    if es_item:
+                        tv = await tmdb.details("tv", es_item.id)
+                        if tv:
+                            tv_ep = await tmdb.episode_details(es_item.id, season, episode)
+                            return tmdb.build_tv_payload(tv, tv_ep, season, episode, quality, encoded_string)
                     return cinemeta.build_tv_payload(
                         detail, ep or {}, imdb_id, title, season, episode, quality, encoded_string
                     )
