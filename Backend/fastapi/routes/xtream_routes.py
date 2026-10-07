@@ -104,8 +104,13 @@ async def _list_vod_streams() -> list:
             "stream_id": sid,
             "stream_icon": m.get("poster") or "",
             "rating": str(m.get("rating") or ""),
+            "rating_5based": round((m.get("rating") or 0) / 2, 1),
+            "added": str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else "",
+            "is_adult": "0",
             "category_id": "1",
             "container_extension": "mkv",
+            "custom_sid": "",
+            "direct_source": "",
         })
     return out
 
@@ -123,8 +128,13 @@ async def _list_series() -> list:
             "series_id": sid,
             "name": s.get("title") or "Untitled",
             "cover": s.get("poster") or "",
+            "cover_big": s.get("poster") or "",
+            "plot": s.get("description") or "",
+            "genre": ", ".join(s.get("genres") or []),
+            "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
             "category_id": "2",
             "rating": str(s.get("rating") or ""),
+            "rating_5based": round((s.get("rating") or 0) / 2, 1),
         })
     return out
 
@@ -158,11 +168,27 @@ async def _series_info(series_id: int) -> dict:
                 "season": snum,
                 "title": ep.get("title") or f"Episode {enum}",
                 "container_extension": "mkv",
+                "info": {
+                    "plot": ep.get("overview") or "",
+                    "movie_image": ep.get("episode_backdrop") or tv_doc.get("poster") or "",
+                    "releasedate": ep.get("released") or "",
+                },
             })
         episodes_out[str(snum)] = eps
 
+    poster = tv_doc.get("poster") or ""
+    genres = tv_doc.get("genres") or []
     return {
-        "info": {"name": tv_doc.get("title"), "cover": tv_doc.get("poster")},
+        "info": {
+            "name": tv_doc.get("title"),
+            "cover": poster,
+            "cover_big": poster,
+            "backdrop_path": [tv_doc.get("backdrop")] if tv_doc.get("backdrop") else [],
+            "plot": tv_doc.get("description") or "",
+            "genre": ", ".join(genres) if genres else "",
+            "rating": str(tv_doc.get("rating") or ""),
+            "releaseDate": f"{tv_doc.get('release_year')}-01-01" if tv_doc.get("release_year") else "",
+        },
         "seasons": seasons_out,
         "episodes": episodes_out,
     }
@@ -175,8 +201,25 @@ async def _vod_info(vod_id: int) -> dict:
     movie = await db.get_media_details(imdb_id=doc["imdb_id"])
     if not movie:
         return {}
+    plot = movie.get("description") or ""
+    poster = movie.get("poster") or ""
+    genres = movie.get("genres") or []
+    rating = movie.get("rating") or 0
+    release_year = movie.get("release_year")
     return {
-        "info": {"name": movie.get("title"), "movie_image": movie.get("poster"), "description": movie.get("description")},
+        "info": {
+            "name": movie.get("title"),
+            "o_name": movie.get("original_title") or movie.get("title"),
+            "movie_image": poster,
+            "cover_big": poster,
+            "backdrop_path": [movie.get("backdrop")] if movie.get("backdrop") else [],
+            "plot": plot,
+            "description": plot,
+            "genre": ", ".join(genres) if genres else "",
+            "rating": str(rating),
+            "releasedate": f"{release_year}-01-01" if release_year else "",
+            "tmdb_id": str(movie.get("tmdb_id") or ""),
+        },
         "movie_data": {"stream_id": vod_id, "container_extension": "mkv"},
     }
 
