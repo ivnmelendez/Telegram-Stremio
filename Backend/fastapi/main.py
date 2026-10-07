@@ -44,6 +44,7 @@ from Backend.fastapi.routes.api_routes import (
     get_db_stats_api,
     get_all_subscribers_api,
     get_all_tokens_api,
+    get_xtream_credentials_api,
     get_auto_catalog_settings_api,
     get_catalog_order_api,
     update_catalog_order_api,
@@ -121,6 +122,7 @@ from Backend.fastapi.routes.stream_routes import router as stream_router
 from Backend.fastapi.routes.cf_routes import router as cf_router
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.webdav_routes import router as webdav_router
+from Backend.fastapi.routes.xtream_routes import router as xtream_router
 from Backend.fastapi.routes.template_routes import (
     admin_access_page,
     admin_dashboard_page,
@@ -176,6 +178,7 @@ app.include_router(stream_router)
 app.include_router(cf_router)
 app.include_router(stremio_router)
 app.include_router(webdav_router)
+app.include_router(xtream_router)
 
 
 #----- Public routes (no authentication)
@@ -363,6 +366,10 @@ async def update_token(token: str, payload: dict, _: bool = Depends(require_auth
 @app.delete("/api/tokens/{token}")
 async def revoke_token(token: str, _: bool = Depends(require_auth)):
     return await revoke_token_api(token)
+
+@app.post("/api/tokens/{token}/xtream")
+async def get_xtream_credentials(token: str, _: bool = Depends(require_auth)):
+    return await get_xtream_credentials_api(token)
 
 @app.get("/api/system/stats")
 async def get_system_stats(_: bool = Depends(require_auth)):

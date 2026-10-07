@@ -7,6 +7,7 @@ import secrets
 import shutil
 from datetime import datetime
 from time import time
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -929,6 +930,22 @@ async def get_all_tokens_api() -> dict:
         return {"tokens": result, "subscription": sub_on}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+#----- Xtream Codes credentials for a token (TiviMate/IPTV player login). Generated
+#----- on first call; the plaintext password is only ever returned that first time.
+async def get_xtream_credentials_api(token: str) -> dict:
+    creds = await db.get_or_create_xtream_credentials(token)
+    if not creds:
+        raise HTTPException(status_code=404, detail="Token not found.")
+    username, password = creds
+    parsed = urlparse(SettingsManager.current().base_url or "")
+    return {
+        "username": username,
+        "password": password,  #----- None if it already existed
+        "host": parsed.hostname or "",
+        "port": str(parsed.port or (443 if parsed.scheme == "https" else 80)),
+    }
 
 
 async def revoke_token_api(token: str) -> dict:

@@ -1,6 +1,7 @@
 import re
 import secrets
 import string
+import zlib
 from asyncio import create_task
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -13,6 +14,7 @@ from pymongo import ASCENDING, DESCENDING
 from Backend.config import Telegram
 from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPart, Season, TVShowSchema
+from Backend.helper.passwords import hash_password, verify_password
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.task_manager import delete_message
 from Backend.logger import LOGGER
@@ -2419,6 +2421,55 @@ class Database:
             {"$set": {"max_concurrent_streams": max_concurrent_streams if max_concurrent_streams else None}}
         )
         return result.modified_count > 0
+
+    #-----
+    #----- Xtream Codes Facade
+    #-----
+
+    #----- Return (username, password) for a token, generating+persisting them on first use.
+    #----- The plaintext password is only ever returned the moment it's created; after that
+    #----- only its hash is stored, same pattern as admin_password.
+    async def get_or_create_xtream_credentials(self, token: str) -> Optional[Tuple[str, Optional[str]]]:
+        coll = self.dbs["tracking"]["api_tokens"]
+        doc = await coll.find_one({"token": token}, {"xtream_username": 1})
+        if not doc:
+            return None
+        if doc.get("xtream_username"):
+            return doc["xtream_username"], None
+
+        alphabet = string.ascii_lowercase + string.digits
+        username = "nl" + ''.join(secrets.choice(alphabet) for _ in range(8))
+        password = ''.join(secrets.choice(alphabet) for _ in range(10))
+        await coll.update_one(
+            {"token": token},
+            {"$set": {"xtream_username": username, "xtream_password_hash": hash_password(password)}},
+        )
+        return username, password
+
+    async def get_token_by_xtream_username(self, username: str) -> Optional[dict]:
+        doc = await self.dbs["tracking"]["api_tokens"].find_one({"xtream_username": username})
+        return convert_objectid_to_str(doc) if doc else None
+
+    #----- Deterministic int ID for a piece of content, upserted into the map so
+    #----- resolve_xtream_stream_id() can look it up later. Idempotent.
+    async def upsert_xtream_stream_id(
+        self, imdb_id: str, media_type: str, season_number: int = None, episode_number: int = None
+    ) -> int:
+        key = f"{imdb_id}:{season_number}:{episode_number}"
+        stream_id = zlib.crc32(key.encode()) & 0x7FFFFFFF
+        await self.dbs["tracking"]["xtream_stream_map"].update_one(
+            {"_id": stream_id},
+            {"$set": {
+                "imdb_id": imdb_id, "media_type": media_type,
+                "season_number": season_number, "episode_number": episode_number,
+            }},
+            upsert=True,
+        )
+        return stream_id
+
+    async def resolve_xtream_stream_id(self, stream_id: int) -> Optional[dict]:
+        doc = await self.dbs["tracking"]["xtream_stream_map"].find_one({"_id": stream_id})
+        return doc
 
     #-----
     #----- Admin / Link Checker Methods

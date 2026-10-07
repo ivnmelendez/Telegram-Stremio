@@ -314,6 +314,28 @@
     </div>
 </div>
 
+<!-- Xtream Credentials Modal -->
+<div id="xtream-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass">
+        <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+                <h3 class="text-xl font-bold section-title">Xtream Codes Login (TiviMate)</h3>
+                <p class="text-sm text-soft mt-1" id="xtream-warning">Save the password now — it won't be shown again.</p>
+            </div>
+            <button onclick="closeModal('xtream-modal')" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="space-y-3 text-sm">
+            <div class="modal-field"><label>Host</label><input type="text" id="xtream-host" readonly class="glass-input"></div>
+            <div class="modal-field"><label>Port</label><input type="text" id="xtream-port" readonly class="glass-input"></div>
+            <div class="modal-field"><label>Username</label><input type="text" id="xtream-username" readonly class="glass-input"></div>
+            <div class="modal-field"><label>Password</label><input type="text" id="xtream-password" readonly class="glass-input"></div>
+        </div>
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6">
+            <button onclick="closeModal('xtream-modal')" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">Close</button>
+        </div>
+    </div>
+</div>
+
 <!-- Assign Plan Modal -->
 <div id="assign-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
     <div class="modal-glass">
@@ -452,6 +474,7 @@
 
         if (t.has_token) {
             btns += `<button onclick="openLimitsModal('${tokenArg}', ${t.daily_limit_gb || 0}, ${t.monthly_limit_gb || 0}, ${t.max_concurrent_streams || 0})" class="action-chip glass-btn">Limits</button>`;
+            btns += `<button onclick="showXtreamCreds('${tokenArg}')" class="action-chip glass-btn">Xtream (TiviMate)</button>`;
         }
 
         if (subEnabled) {
@@ -644,6 +667,26 @@
             const resp = await fetch('/api/tokens/' + encodeURIComponent(token), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (resp.ok) { showToast('Limits updated.', 'success', 'Updated'); closeModal('limits-modal'); loadTokens(); }
             else { showToast('Failed to update limits.', 'error', 'Failed'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
+    }
+
+    async function showXtreamCreds(token) {
+        try {
+            const resp = await fetch('/api/tokens/' + encodeURIComponent(token) + '/xtream', { method: 'POST' });
+            if (!resp.ok) { showToast('Failed to get Xtream credentials.', 'error', 'Failed'); return; }
+            const d = await resp.json();
+            document.getElementById('xtream-host').value = d.host || '';
+            document.getElementById('xtream-port').value = d.port || '';
+            document.getElementById('xtream-username').value = d.username || '';
+            const warn = document.getElementById('xtream-warning');
+            if (d.password) {
+                document.getElementById('xtream-password').value = d.password;
+                warn.textContent = "Save the password now — it won't be shown again.";
+            } else {
+                document.getElementById('xtream-password').value = '(already set — only shown once, at creation)';
+                warn.textContent = 'This account already has Xtream credentials.';
+            }
+            openModal('xtream-modal');
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
     }
 
