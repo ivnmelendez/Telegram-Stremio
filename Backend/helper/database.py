@@ -121,6 +121,7 @@ class Database:
                 await db[collection_name].create_index([("tmdb_id", ASCENDING)])
                 await db[collection_name].create_index([("imdb_id", ASCENDING)])
                 await db[collection_name].create_index([("kitsu_id", ASCENDING)])
+                await db[collection_name].create_index([("updated_on", DESCENDING)])
             except Exception as e:
                 LOGGER.error(f"Failed creating index on {db_key}/{collection_name}: {e}")
 
@@ -2466,6 +2467,30 @@ class Database:
             upsert=True,
         )
         return stream_id
+
+    #----- Same mapping as upsert_xtream_stream_id but for many episodes in one
+    #----- round-trip (one bulk_write instead of N sequential upserts). items:
+    #----- [(imdb_id, media_type, season_number, episode_number), ...].
+    async def upsert_xtream_stream_ids_bulk(self, items: list) -> dict:
+        from pymongo import UpdateOne
+
+        ids = {}
+        ops = []
+        for imdb_id, media_type, season_number, episode_number in items:
+            key = f"{imdb_id}:{season_number}:{episode_number}"
+            stream_id = zlib.crc32(key.encode()) & 0x7FFFFFFF
+            ids[key] = stream_id
+            ops.append(UpdateOne(
+                {"_id": stream_id},
+                {"$set": {
+                    "imdb_id": imdb_id, "media_type": media_type,
+                    "season_number": season_number, "episode_number": episode_number,
+                }},
+                upsert=True,
+            ))
+        if ops:
+            await self.dbs["tracking"]["xtream_stream_map"].bulk_write(ops, ordered=False)
+        return ids
 
     async def resolve_xtream_stream_id(self, stream_id: int) -> Optional[dict]:
         doc = await self.dbs["tracking"]["xtream_stream_map"].find_one({"_id": stream_id})
