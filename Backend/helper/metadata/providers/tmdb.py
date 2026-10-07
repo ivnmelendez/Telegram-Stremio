@@ -292,6 +292,7 @@ def build_tv_payload(tv, ep, season, episode, quality, encoded_string) -> dict:
             getattr(getattr(tv, "external_ids", None), "imdb_id", None)
         ),
         "genres": [g.name for g in (tv.genres or [])],
+        "networks": [n.name for n in (getattr(tv, "networks", None) or [])],
         "media_type": "tv",
         "cast": _extract_cast(tv),
         "runtime": str(runtime),
