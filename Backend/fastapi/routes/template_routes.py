@@ -203,6 +203,13 @@ async def admin_access_page(request: Request, _: bool = Depends(require_auth)):
     return templates.TemplateResponse("access_manage.html", ctx)
 
 
+#----- Family/friend login accounts shell (manifest + external Xtream assignment)
+async def admin_family_users_page(request: Request, _: bool = Depends(require_auth)):
+    ctx = _base_context(request)
+    ctx["current_user"] = get_current_user(request)
+    return templates.TemplateResponse("family_users.html", ctx)
+
+
 #----- Content requests shell (admin)
 async def admin_requests_page(request: Request, _: bool = Depends(require_auth)):
     ctx = _base_context(request)

@@ -2908,3 +2908,100 @@ async def bot_admin_apply_status_api() -> dict:
             "error": st["error"],
         },
     }
+
+
+#-----
+#----- Family / Friend Login Users (admin-managed accounts for TuvoraTV login)
+#-----
+
+def _family_manifest_url(api_token: str) -> str:
+    return f"{SettingsManager.current().base_url}/stremio/{api_token}/manifest.json"
+
+
+def _family_user_public(doc: dict) -> dict:
+    return {
+        "username": doc.get("username"),
+        "api_token": doc.get("api_token"),
+        "manifest_url": _family_manifest_url(doc.get("api_token")) if doc.get("api_token") else None,
+        "xtream": doc.get("xtream"),
+        "is_active": doc.get("is_active", True),
+        "created_at": doc.get("created_at"),
+    }
+
+
+async def list_family_users_api() -> dict:
+    docs = await db.list_family_users()
+    return {"users": [_family_user_public(d) for d in docs]}
+
+
+async def create_family_user_api(payload: dict) -> dict:
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    api_token = (payload.get("api_token") or "").strip()
+    xtream = payload.get("xtream") or None
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="username and password are required")
+    if not api_token:
+        raise HTTPException(status_code=400, detail="api_token is required")
+    if not await db.get_api_token(api_token):
+        raise HTTPException(status_code=404, detail="api_token does not exist")
+    if xtream and not all(xtream.get(k) for k in ("host", "username", "password")):
+        raise HTTPException(status_code=400, detail="xtream requires host, username and password")
+
+    doc = await db.create_family_user(username, hash_password(password), api_token, xtream)
+    if not doc:
+        raise HTTPException(status_code=409, detail="username already exists")
+    return _family_user_public(doc)
+
+
+async def update_family_user_api(username: str, payload: dict) -> dict:
+    updates: dict = {}
+    if payload.get("password"):
+        updates["password_hash"] = hash_password(payload["password"])
+    if payload.get("api_token"):
+        api_token = payload["api_token"].strip()
+        if not await db.get_api_token(api_token):
+            raise HTTPException(status_code=404, detail="api_token does not exist")
+        updates["api_token"] = api_token
+    if "xtream" in payload:
+        xtream = payload.get("xtream") or None
+        if xtream and not all(xtream.get(k) for k in ("host", "username", "password")):
+            raise HTTPException(status_code=400, detail="xtream requires host, username and password")
+        updates["xtream"] = xtream
+    if "is_active" in payload:
+        updates["is_active"] = bool(payload["is_active"])
+
+    ok = await db.update_family_user(username, updates)
+    if not ok:
+        raise HTTPException(status_code=404, detail="user not found")
+    doc = await db.get_family_user_by_username(username)
+    return _family_user_public(doc)
+
+
+async def delete_family_user_api(username: str) -> dict:
+    ok = await db.delete_family_user(username)
+    if not ok:
+        raise HTTPException(status_code=404, detail="user not found")
+    return {"status": "success", "message": "User deleted."}
+
+
+#----- Public (no admin session) - called by the TuvoraTV login screen.
+async def family_login_api(payload: dict) -> dict:
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not username or not password:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    doc = await db.get_family_user_by_username(username)
+    if not doc or not doc.get("is_active", True) or not verify_password(password, doc.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    api_token = doc.get("api_token")
+    if not api_token or not await db.get_api_token(api_token):
+        raise HTTPException(status_code=409, detail="This account has no valid addon assigned. Contact the admin.")
+
+    return {
+        "manifest_url": _family_manifest_url(api_token),
+        "xtream": doc.get("xtream"),
+    }

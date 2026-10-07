@@ -83,6 +83,7 @@ class Database:
                 await tracking["custom_catalogs"].create_index(
                     [("items.tmdb_id", ASCENDING), ("items.media_type", ASCENDING)]
                 )
+                await tracking["family_users"].create_index([("username", ASCENDING)], unique=True)
                 await self._ensure_subtitle_indexes(tracking)
             except Exception as e:
                 LOGGER.error(f"Failed creating tracking indexes: {e}")
@@ -2422,6 +2423,51 @@ class Database:
             {"$set": {"max_concurrent_streams": max_concurrent_streams if max_concurrent_streams else None}}
         )
         return result.modified_count > 0
+
+    #-----
+    #----- Family / Friend Login Users
+    #-----
+
+    #----- Login accounts shared with family/friends: each links to an existing
+    #----- api_tokens.token (reuses the already-generated manifest) and optionally
+    #----- carries manually-entered Xtream Codes creds for a THIRD-PARTY provider
+    #----- (not our own Xtream facade above).
+    async def create_family_user(self, username: str, password_hash: str, api_token: str, xtream: Optional[dict] = None) -> Optional[dict]:
+        existing = await self.dbs["tracking"]["family_users"].find_one({"username": username})
+        if existing:
+            return None
+        doc = {
+            "username": username,
+            "password_hash": password_hash,
+            "api_token": api_token,
+            "xtream": xtream,
+            "is_active": True,
+            "created_at": datetime.utcnow(),
+        }
+        await self.dbs["tracking"]["family_users"].insert_one(doc)
+        return convert_objectid_to_str(doc)
+
+    async def get_family_user_by_username(self, username: str) -> Optional[dict]:
+        doc = await self.dbs["tracking"]["family_users"].find_one({"username": username})
+        return convert_objectid_to_str(doc) if doc else None
+
+    async def list_family_users(self) -> List[dict]:
+        cursor = self.dbs["tracking"]["family_users"].find().sort("created_at", DESCENDING)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(doc) for doc in docs]
+
+    async def update_family_user(self, username: str, updates: dict) -> bool:
+        updates = {k: v for k, v in updates.items() if v is not None or k == "xtream"}
+        if not updates:
+            return False
+        result = await self.dbs["tracking"]["family_users"].update_one(
+            {"username": username}, {"$set": updates}
+        )
+        return result.modified_count > 0 or result.matched_count > 0
+
+    async def delete_family_user(self, username: str) -> bool:
+        result = await self.dbs["tracking"]["family_users"].delete_one({"username": username})
+        return result.deleted_count > 0
 
     #-----
     #----- Xtream Codes Facade

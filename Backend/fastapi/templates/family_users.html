@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+{% block title %}Family & Friends{% endblock %}
+
+{% block content %}
+<style>
+    .access-shell { display: flex; flex-direction: column; gap: 1.5rem; }
+
+    .page-hero, .section-panel, .table-shell, .stat-card, .mobile-token-card, .empty-state, .modal-glass {
+        background: color-mix(in srgb, var(--card) 50%, transparent);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid var(--border);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+    }
+    .page-hero, .section-panel, .table-shell, .stat-card, .mobile-token-card, .empty-state { border-radius: 1.5rem; }
+
+    .hero-glow { position: relative; overflow: hidden; isolation: isolate; }
+    .hero-glow::before {
+        content: ""; position: absolute; inset: -30% auto auto -10%;
+        width: 16rem; height: 16rem; border-radius: 9999px;
+        background: color-mix(in srgb, var(--primary) 18%, transparent);
+        filter: blur(52px); z-index: -1; pointer-events: none;
+    }
+    .hero-glow::after {
+        content: ""; position: absolute; inset: auto -4% -34% auto;
+        width: 14rem; height: 14rem; border-radius: 9999px;
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        filter: blur(52px); z-index: -1; pointer-events: none;
+    }
+
+    .section-title { color: var(--text); }
+    .section-muted { color: var(--text-sec); }
+
+    .glass-btn {
+        border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+        background: color-mix(in srgb, var(--card) 92%, var(--bg));
+        color: var(--text); transition: all 0.25s ease; box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+    }
+    .glass-btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+
+    .glass-btn-primary {
+        background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 88%, white 8%), color-mix(in srgb, var(--accent) 82%, var(--primary) 18%));
+        color: white; border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent);
+    }
+    .glass-btn-primary:hover { filter: brightness(1.05); }
+    .glass-btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: #fff; border-color: transparent; }
+
+    .glass-input, .glass-select {
+        width: 100%; border-radius: 1rem;
+        border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+        background: color-mix(in srgb, var(--bg) 68%, transparent);
+        color: var(--text); padding: 0.85rem 1rem; outline: none; transition: all 0.2s ease;
+    }
+    .glass-input::placeholder { color: color-mix(in srgb, var(--text-sec) 85%, transparent); }
+    .glass-input:focus, .glass-select:focus {
+        border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+    }
+
+    .stat-card { padding: 1.25rem; text-align: center; position: relative; overflow: hidden; }
+    .stat-card::before {
+        content: ""; position: absolute; width: 7rem; height: 7rem; border-radius: 9999px;
+        filter: blur(42px); top: -25%; right: -10%; opacity: 0.7; pointer-events: none;
+    }
+    .stat-primary::before { background: color-mix(in srgb, var(--primary) 24%, transparent); }
+    .stat-success::before { background: color-mix(in srgb, #22c55e 24%, transparent); }
+    .stat-value { font-size: 1.9rem; font-weight: 800; line-height: 1; position: relative; z-index: 1; }
+    .stat-label {
+        margin-top: 0.55rem; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; color: var(--text-sec); position: relative; z-index: 1;
+    }
+
+    .table-shell { overflow: hidden; }
+    .access-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .access-table thead th {
+        background: color-mix(in srgb, var(--bg) 65%, transparent);
+        color: var(--text-sec); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+    }
+    .access-table tbody tr { transition: background 0.22s ease; }
+    .access-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+    .access-table td { border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); color: var(--text); vertical-align: top; }
+    .access-table tbody tr:last-child td { border-bottom: none; }
+
+    .status-badge {
+        display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.8rem;
+        border-radius: 9999px; font-size: 0.78rem; font-weight: 700; border: 1px solid transparent;
+    }
+    .status-active { background: color-mix(in srgb, #22c55e 16%, transparent); color: #86efac; border-color: color-mix(in srgb, #22c55e 28%, transparent); }
+    .status-inactive { background: color-mix(in srgb, #ef4444 14%, transparent); color: #fca5a5; border-color: color-mix(in srgb, #ef4444 28%, transparent); }
+    .status-warning { background: color-mix(in srgb, #f59e0b 16%, transparent); color: #fde68a; border-color: color-mix(in srgb, #f59e0b 28%, transparent); }
+
+    .action-chip { border-radius: 9999px; padding: 0.5rem 0.85rem; font-size: 0.72rem; font-weight: 700; border: 1px solid transparent; transition: all 0.2s ease; white-space: nowrap; }
+    .action-chip:hover { transform: translateY(-1px); }
+
+    .addon-box { padding: 0.8rem; border-radius: 1rem; background: color-mix(in srgb, var(--bg) 56%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+
+    .mobile-token-card { padding: 1rem; }
+    .mobile-token-card + .mobile-token-card { margin-top: 0.9rem; }
+    .mobile-grid { display: none; }
+
+    .modal-backdrop { background: rgba(4, 8, 18, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    .modal-glass { border-radius: 1.6rem; padding: 1.4rem; border: 1px solid color-mix(in srgb, var(--border) 95%, transparent); width: min(92vw, 32rem); max-height: 88vh; overflow-y: auto; }
+    .modal-field label { color: var(--text-sec); font-size: 0.82rem; font-weight: 700; margin-bottom: 0.55rem; display: block; }
+
+    .text-soft { color: var(--text-sec); }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    @media (max-width: 1024px) { .access-table th, .access-table td { padding-left: 1rem; padding-right: 1rem; } }
+    @media (max-width: 767px) {
+        .desktop-table-wrap { display: none; }
+        .mobile-grid { display: block; }
+        .page-hero, .section-panel { padding: 1rem; border-radius: 1.35rem; }
+    }
+</style>
+
+<div class="access-shell py-2 sm:py-4">
+    <section class="page-hero hero-glow p-5 sm:p-6 lg:p-8">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold tracking-[0.18em] uppercase mb-3"
+                     style="border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); color: var(--text-sec); background: color-mix(in srgb, var(--primary) 10%, transparent);">
+                    <i class="fas fa-users text-[11px]" style="color: var(--primary);"></i>
+                    TuvoraTV Login
+                </div>
+                <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight section-title">Family &amp; Friends</h1>
+                <p class="mt-2 text-sm sm:text-base section-muted max-w-2xl">
+                    Create a login for someone, assign them one of your addon manifests, and optionally hand them
+                    an Xtream Codes login from another provider. They enter user/pass in TuvoraTV and everything
+                    auto-configures.
+                </p>
+            </div>
+
+            <div class="flex flex-wrap gap-3">
+                <button onclick="openCreateModal()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-plus"></i> New User
+                </button>
+                <button onclick="loadUsers()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-rotate-right"></i> Refresh
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="stat-card stat-primary">
+            <div class="stat-value" style="color: var(--primary);" id="stat-total">–</div>
+            <div class="stat-label">Total Users</div>
+        </div>
+        <div class="stat-card stat-success">
+            <div class="stat-value" style="color: #4ade80;" id="stat-xtream">–</div>
+            <div class="stat-label">With Xtream Assigned</div>
+        </div>
+    </section>
+
+    <section class="section-panel p-4 sm:p-5 lg:p-6">
+        <div class="desktop-table-wrap table-shell">
+            <div class="overflow-x-auto no-scrollbar">
+                <table class="access-table min-w-[900px] text-sm">
+                    <thead>
+                        <tr>
+                            <th class="px-4 py-4 text-left font-semibold">Status</th>
+                            <th class="px-4 py-4 text-left font-semibold">Username</th>
+                            <th class="px-4 py-4 text-left font-semibold">Manifest</th>
+                            <th class="px-4 py-4 text-left font-semibold">Xtream (other provider)</th>
+                            <th class="px-4 py-4 text-center font-semibold">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-table-body">
+                        <tr><td colspan="5" class="text-center py-10 text-soft">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="user-mobile-list" class="mobile-grid mt-1">
+            <div class="empty-state text-center px-4 py-8 text-soft">Loading…</div>
+        </div>
+    </section>
+</div>
+
+<!-- Create/Edit User Modal -->
+<div id="user-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass">
+        <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+                <h3 class="text-xl font-bold section-title" id="user-modal-title">New User</h3>
+                <p class="text-sm text-soft mt-1">They'll log in to TuvoraTV with this username/password.</p>
+            </div>
+            <button onclick="closeModal('user-modal')" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center"><i class="fas fa-xmark"></i></button>
+        </div>
+
+        <div class="space-y-4">
+            <div class="modal-field">
+                <label>Username</label>
+                <input type="text" id="user-username" placeholder="e.g. mom" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label id="user-password-label">Password</label>
+                <input type="text" id="user-password" placeholder="Choose a password" class="glass-input">
+            </div>
+            <div class="modal-field">
+                <label>Addon Manifest (existing token)</label>
+                <select id="user-token" class="glass-select"><option value="">— Select a token —</option></select>
+            </div>
+
+            <div class="border-t pt-4" style="border-color: color-mix(in srgb, var(--border) 70%, transparent);">
+                <label class="flex items-center gap-3 text-sm section-title cursor-pointer mb-3">
+                    <input type="checkbox" id="user-xtream-enable" class="w-4 h-4" onchange="toggleXtreamFields()">
+                    Assign an Xtream Codes login (another provider)
+                </label>
+                <div id="user-xtream-fields" class="space-y-3 hidden">
+                    <div class="modal-field"><label>Host (e.g. http://provider.com:8080)</label><input type="text" id="user-xtream-host" class="glass-input"></div>
+                    <div class="modal-field"><label>Username</label><input type="text" id="user-xtream-username" class="glass-input"></div>
+                    <div class="modal-field"><label>Password</label><input type="text" id="user-xtream-password" class="glass-input"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6">
+            <button onclick="closeModal('user-modal')" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">Cancel</button>
+            <button onclick="saveUser()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">Save</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let allUsers = [];
+    let allTokensForSelect = [];
+    let editingUsername = null;
+
+    function escHtml(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function statusBadge(u) {
+        return u.is_active
+            ? `<span class="status-badge status-active"><i class="fas fa-circle text-[8px]"></i> Active</span>`
+            : `<span class="status-badge status-inactive"><i class="fas fa-circle text-[8px]"></i> Disabled</span>`;
+    }
+
+    function manifestHtml(u) {
+        if (!u.manifest_url) return `<div class="addon-box"><span class="status-badge status-warning">No token assigned</span></div>`;
+        return `<div class="addon-box"><button onclick="copyLink('${escHtml(u.manifest_url)}')" class="glass-btn glass-btn-primary rounded-xl px-3 py-2 text-xs font-bold inline-flex items-center gap-2"><i class="fas fa-copy"></i> Copy Install Link</button></div>`;
+    }
+
+    function xtreamHtml(u) {
+        if (!u.xtream) return `<div class="text-soft text-xs">—</div>`;
+        return `<div class="text-xs section-title"><div><b>${escHtml(u.xtream.host)}</b></div><div class="text-soft">${escHtml(u.xtream.username)}</div></div>`;
+    }
+
+    function buildActions(u) {
+        return `
+            <button onclick='openEditModal(${JSON.stringify(u)})' class="action-chip glass-btn">Edit</button>
+            <button onclick="deleteUser('${escHtml(u.username)}')" class="action-chip glass-btn-danger">Delete</button>`;
+    }
+
+    function renderDesktopRows() {
+        const tbody = document.getElementById('user-table-body');
+        if (!allUsers.length) { tbody.innerHTML = `<tr><td colspan="5" class="text-center py-10 text-soft">No users yet.</td></tr>`; return; }
+        tbody.innerHTML = allUsers.map(u => `
+            <tr>
+                <td class="px-4 py-4">${statusBadge(u)}</td>
+                <td class="px-4 py-4"><div class="font-semibold section-title">${escHtml(u.username)}</div></td>
+                <td class="px-4 py-4">${manifestHtml(u)}</td>
+                <td class="px-4 py-4">${xtreamHtml(u)}</td>
+                <td class="px-4 py-4"><div class="flex flex-wrap gap-2 justify-center">${buildActions(u)}</div></td>
+            </tr>`).join('');
+    }
+
+    function renderMobileCards() {
+        const wrap = document.getElementById('user-mobile-list');
+        if (!allUsers.length) { wrap.innerHTML = `<div class="empty-state text-center px-4 py-8 text-soft">No users yet.</div>`; return; }
+        wrap.innerHTML = allUsers.map(u => `
+            <div class="mobile-token-card">
+                <div class="flex items-start justify-between gap-3 mb-3">
+                    <div class="font-semibold section-title">${escHtml(u.username)}</div>
+                    <div class="shrink-0">${statusBadge(u)}</div>
+                </div>
+                <div class="grid grid-cols-1 gap-3 mb-3">
+                    <div class="rounded-2xl px-4 py-3" style="background: color-mix(in srgb, var(--bg) 55%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);">
+                        <div class="text-[11px] uppercase tracking-[0.14em] text-soft font-bold mb-1">Manifest</div>${manifestHtml(u)}
+                    </div>
+                    <div class="rounded-2xl px-4 py-3" style="background: color-mix(in srgb, var(--bg) 55%, transparent); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);">
+                        <div class="text-[11px] uppercase tracking-[0.14em] text-soft font-bold mb-1">Xtream</div>${xtreamHtml(u)}
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2">${buildActions(u)}</div>
+            </div>`).join('');
+    }
+
+    async function loadUsers() {
+        document.getElementById('user-table-body').innerHTML = `<tr><td colspan="5" class="text-center py-10 text-soft">Loading…</td></tr>`;
+        try {
+            const resp = await fetch('/api/family-users');
+            const data = await resp.json();
+            allUsers = data.users || [];
+            document.getElementById('stat-total').textContent = allUsers.length;
+            document.getElementById('stat-xtream').textContent = allUsers.filter(u => u.xtream).length;
+            renderDesktopRows();
+            renderMobileCards();
+        } catch (err) {
+            document.getElementById('user-table-body').innerHTML = `<tr><td colspan="5" class="text-center py-10 text-red-300">Error: ${err.message}</td></tr>`;
+            showToast('Failed to load users.', 'error', 'Load Error');
+        }
+    }
+
+    async function loadTokensForSelect() {
+        try {
+            const resp = await fetch('/api/admin/access/tokens');
+            const data = await resp.json();
+            allTokensForSelect = (data.tokens || []).filter(t => t.token);
+            const sel = document.getElementById('user-token');
+            sel.innerHTML = '<option value="">— Select a token —</option>' +
+                allTokensForSelect.map(t => `<option value="${escHtml(t.token)}">${escHtml(t.user_name || t.token)}</option>`).join('');
+        } catch (e) { /* ignore */ }
+    }
+
+    function openModal(id) {
+        const m = document.getElementById(id);
+        m.classList.remove('hidden'); m.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
+    }
+    function closeModal(id) {
+        const m = document.getElementById(id);
+        m.classList.add('hidden'); m.classList.remove('flex');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    function toggleXtreamFields() {
+        const on = document.getElementById('user-xtream-enable').checked;
+        document.getElementById('user-xtream-fields').classList.toggle('hidden', !on);
+    }
+
+    function openCreateModal() {
+        editingUsername = null;
+        document.getElementById('user-modal-title').textContent = 'New User';
+        document.getElementById('user-username').value = '';
+        document.getElementById('user-username').disabled = false;
+        document.getElementById('user-password-label').textContent = 'Password';
+        document.getElementById('user-password').value = '';
+        document.getElementById('user-token').value = '';
+        document.getElementById('user-xtream-enable').checked = false;
+        document.getElementById('user-xtream-host').value = '';
+        document.getElementById('user-xtream-username').value = '';
+        document.getElementById('user-xtream-password').value = '';
+        toggleXtreamFields();
+        openModal('user-modal');
+    }
+
+    function openEditModal(u) {
+        editingUsername = u.username;
+        document.getElementById('user-modal-title').textContent = 'Edit ' + u.username;
+        document.getElementById('user-username').value = u.username;
+        document.getElementById('user-username').disabled = true;
+        document.getElementById('user-password-label').textContent = 'New Password (leave blank to keep current)';
+        document.getElementById('user-password').value = '';
+        document.getElementById('user-token').value = u.api_token || '';
+        const hasXtream = !!u.xtream;
+        document.getElementById('user-xtream-enable').checked = hasXtream;
+        document.getElementById('user-xtream-host').value = hasXtream ? u.xtream.host : '';
+        document.getElementById('user-xtream-username').value = hasXtream ? u.xtream.username : '';
+        document.getElementById('user-xtream-password').value = hasXtream ? u.xtream.password : '';
+        toggleXtreamFields();
+        openModal('user-modal');
+    }
+
+    async function saveUser() {
+        const username = document.getElementById('user-username').value.trim();
+        const password = document.getElementById('user-password').value;
+        const apiToken = document.getElementById('user-token').value;
+        const xtreamEnabled = document.getElementById('user-xtream-enable').checked;
+
+        if (!username) { showToast('Username is required.', 'error', 'Validation'); return; }
+        if (!editingUsername && !password) { showToast('Password is required.', 'error', 'Validation'); return; }
+        if (!apiToken) { showToast('Select an addon token to assign.', 'error', 'Validation'); return; }
+
+        let xtream = null;
+        if (xtreamEnabled) {
+            xtream = {
+                host: document.getElementById('user-xtream-host').value.trim(),
+                username: document.getElementById('user-xtream-username').value.trim(),
+                password: document.getElementById('user-xtream-password').value,
+            };
+            if (!xtream.host || !xtream.username || !xtream.password) {
+                showToast('Fill host, username and password for Xtream, or uncheck it.', 'error', 'Validation'); return;
+            }
+        }
+
+        try {
+            let resp;
+            if (editingUsername) {
+                const payload = { api_token: apiToken, xtream };
+                if (password) payload.password = password;
+                resp = await fetch('/api/family-users/' + encodeURIComponent(editingUsername), {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+                });
+            } else {
+                resp = await fetch('/api/family-users', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, api_token: apiToken, xtream }),
+                });
+            }
+            if (resp.ok) { showToast('Saved.', 'success', 'Saved'); closeModal('user-modal'); loadUsers(); }
+            else { const d = await resp.json(); showToast(d.detail || 'Failed to save.', 'error', 'Failed'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
+    }
+
+    async function deleteUser(username) {
+        if (!confirm(`Delete "${username}"? They'll lose access immediately.`)) return;
+        try {
+            const resp = await fetch('/api/family-users/' + encodeURIComponent(username), { method: 'DELETE' });
+            if (resp.ok) { showToast('User deleted.', 'success', 'Deleted'); loadUsers(); }
+            else { const d = await resp.json(); showToast(d.detail || 'Failed.', 'error', 'Delete Failed'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
+    }
+
+    async function copyLink(url) {
+        try { await navigator.clipboard.writeText(url); showToast('Link copied!', 'success', 'Copied'); }
+        catch { prompt('Copy this link:', url); }
+    }
+
+    document.getElementById('user-modal').addEventListener('click', function (e) { if (e.target === this) closeModal('user-modal'); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('user-modal'); });
+
+    loadTokensForSelect();
+    loadUsers();
+</script>
+{% endblock %}
