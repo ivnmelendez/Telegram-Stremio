@@ -705,6 +705,7 @@
         const state = document.getElementById('ma-search-state');
         const box = document.getElementById('ma-search-results');
         if (!q) { showToast('Enter a title, IMDb or TMDB id/link.', 'error', 'Error'); return; }
+        maUnlink();
         state.textContent = 'Searching...';
         state.classList.remove('hidden');
         box.classList.add('hidden');

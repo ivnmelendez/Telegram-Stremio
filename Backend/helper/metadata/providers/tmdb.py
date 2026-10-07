@@ -268,6 +268,22 @@ async def external_imdb_id(media_type: str, tmdb_id) -> str | None:
         return None
 
 
+#----- Cinemeta/IMDb search has no locale (always English) - look the same title
+#----- up on TMDB by imdb_id to get it in Spanish (client is es-MX), used to
+#----- enrich Cinemeta candidates in the manual-search picker.
+async def spanish_title_by_imdb(imdb_id: str, media_type: str):
+    if not imdb_id:
+        return None
+    client = get_tmdb_client()
+    try:
+        async with API_SEMAPHORE:
+            found = await client.find().by_imdb(imdb_id)
+        items = found.movie_results if media_type == "movie" else found.tv_results
+        return items[0] if items else None
+    except Exception:
+        return None
+
+
 def build_movie_payload(movie, quality, encoded_string) -> dict:
     release = getattr(movie, "release_date", None)
     title = movie.title or getattr(movie, "original_title", "") or ""

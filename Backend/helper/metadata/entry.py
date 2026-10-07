@@ -305,9 +305,23 @@ async def _search_candidates(query: str, media_type: str, year: int | None = Non
                 continue
             seen.add(("imdb", hid))
             images = format_imdb_images(hid)
+            title, year = hit.get("title", ""), hit.get("year", "")
+            poster, backdrop = hit.get("poster") or images["poster"], images["backdrop"]
+            tmdb_id = None
+            #----- Cinemeta/IMDb search has no locale (always English) - look the
+            #----- same title up on TMDB by imdb_id to show it in Spanish instead.
+            es_item = await tmdb.spanish_title_by_imdb(hid, media_type)
+            if es_item is not None:
+                es_title, es_year = tmdb.tmdb_title_year(es_item, media_type)
+                if es_title:
+                    title = es_title
+                    year = es_year or year
+                    poster = format_tmdb_image(getattr(es_item, "poster_path", None)) or poster
+                    backdrop = format_tmdb_image(getattr(es_item, "backdrop_path", None), "original") or backdrop
+                    tmdb_id = getattr(es_item, "id", None)
             results.append(_candidate_entry(
-                "imdb", hit.get("title", ""), hit.get("year", ""),
-                hid, None, hit.get("poster") or images["poster"], images["backdrop"],
+                "imdb", title, year,
+                hid, tmdb_id, poster, backdrop,
                 "IMDb / Cinemeta", media_type,
             ))
     except Exception as e:
