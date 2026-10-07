@@ -256,9 +256,12 @@ async def _list_vod_streams(category_id: str = None) -> list:
         #----- arma su submenu de categorias con get_vod_categories, no escaneando
         #----- este dump, asi que duplicar aca solo infla el catalogo sin razon.
         #----- category_ids expone TODAS las categorias (Todas + genero + Estrenos)
-        #----- para clientes que agrupan leyendo el dump sin filtrar en vez de pedir
-        #----- get_vod_streams por categoria.
-        cat = category_id or primary_id or ALL_MOVIES_CATEGORY_ID
+        #----- para clientes que filtran por categoria. Pero algunos clientes (UHF)
+        #----- ignoran category_ids y agrupan leyendo category_id singular del dump
+        #----- sin filtro - por eso Estrenos gana sobre el genero ahi, para que esos
+        #----- clientes tambien la vean poblada (el titulo sigue en su genero via
+        #----- cat_ids/category_ids para los clientes que si filtran).
+        cat = category_id or estreno_id or primary_id or ALL_MOVIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
         name = m.get("title") or "Untitled"
         added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
@@ -297,7 +300,7 @@ async def _list_series(category_id: str = None) -> list:
             continue
         #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - mismo motivo
         #----- que en _list_vod_streams. category_ids: ver comentario equivalente ahi.
-        cat = category_id or primary_id or ALL_SERIES_CATEGORY_ID
+        cat = category_id or estreno_id or primary_id or ALL_SERIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
         out.append({
             "num": sid,
