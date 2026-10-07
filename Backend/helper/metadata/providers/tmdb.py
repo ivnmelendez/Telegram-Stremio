@@ -203,6 +203,18 @@ async def details(media_type: str, item_id):
                 target = client.movie(item_id) if media_type == "movie" else client.tv(item_id)
                 det = await target.details(append_to_response="external_ids,credits")
                 det.images = await target.images()
+                #----- det.networks (canal original, ej. "Comedy Central") no sirve para
+                #----- saber donde ver la serie HOY. Lo pisamos con el proveedor de
+                #----- streaming real para Mexico via watch/providers (ej. "Paramount Plus").
+                if media_type == "tv":
+                    try:
+                        wp = await target.watch_providers()
+                        mx = (wp.results or {}).get("MX") if wp else None
+                        flatrate = mx.flatrate if mx else None
+                        det.networks = [p.provider_name for p in (flatrate or [])]
+                    except Exception as e:
+                        LOGGER.warning(f"TMDb watch_providers fetch failed for id={item_id}: {e}")
+                        det.networks = []
             return det
         except Exception as e:
             LOGGER.warning(f"TMDb {media_type} details fetch failed for id={item_id}: {e}")
