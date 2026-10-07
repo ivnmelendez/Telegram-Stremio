@@ -61,17 +61,18 @@ def _ensure_stale_cleaner():
         asyncio.create_task(_cleanup_stale_streams())
 
 
-#----- Count distinct titles currently playing for a token (dedupes seeks/retries,
-#----- which open a new connection with a new stream_id for the same video)
-def count_active_streams(token: str) -> int:
+#----- Distinct titles (request_path) currently playing for a token. Seeks/retries open
+#----- a new connection with a new random stream_id for the *same* video, so this dedupes
+#----- by path rather than counting raw connections.
+def active_stream_paths(token: str) -> set:
     if not token:
-        return 0
+        return set()
     paths = set()
     for entry in ACTIVE_STREAMS.values():
         meta = entry.get("meta") or {}
         if meta.get("token") == token:
             paths.add(meta.get("request_path") or id(entry))
-    return len(paths)
+    return paths
 
 
 #----- Telegram file byte streamer with prefetch, multi-client parallelism, and telemetry
