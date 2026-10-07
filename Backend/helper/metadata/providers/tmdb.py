@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import re
+
 from themoviedb import aioTMDb
 
 from Backend.config import Telegram
@@ -29,6 +31,22 @@ from Backend.logger import LOGGER
 
 _tmdb_client: aioTMDb | None = None
 _tmdb_client_key: str | None = None
+
+#----- TMDB lists the same streaming service multiple times under different
+#----- "sold via X" reseller channels (ej. "Paramount Plus Apple TV channel",
+#----- "Paramount Plus Premium"). Strip those suffixes so categories don't
+#----- duplicate the same platform 2-3 times.
+_PROVIDER_SUFFIX_RE = re.compile(
+    r"\s+(Amazon Channel|Apple TV [Cc]hannel|Premium|Essential|Basic with Ads|Roku Premium Channel)$"
+)
+
+
+def _normalize_provider_name(name: str) -> str:
+    prev = None
+    while prev != name:
+        prev = name
+        name = _PROVIDER_SUFFIX_RE.sub("", name)
+    return name.strip()
 
 
 def tmdb_api_key() -> str:
@@ -211,7 +229,12 @@ async def details(media_type: str, item_id):
                         wp = await target.watch_providers()
                         mx = (wp.results or {}).get("MX") if wp else None
                         flatrate = mx.flatrate if mx else None
-                        det.networks = [p.provider_name for p in (flatrate or [])]
+                        seen: list[str] = []
+                        for p in (flatrate or []):
+                            norm = _normalize_provider_name(p.provider_name)
+                            if norm and norm not in seen:
+                                seen.append(norm)
+                        det.networks = seen
                     except Exception as e:
                         LOGGER.warning(f"TMDb watch_providers fetch failed for id={item_id}: {e}")
                         det.networks = []
