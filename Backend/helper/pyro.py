@@ -13,6 +13,7 @@ import re
 from pyrogram.types import BotCommand
 from pyrogram import enums
 import httpx
+import unicodedata
 
 
 _EMOJI_PATTERN = re.compile(
@@ -231,17 +232,21 @@ def clean_filename(filename: str) -> str:
     #----- 3 – Remove decorative unicode symbols
     filename = _DECORATION_PATTERN.sub(" ", filename)
 
-    #----- 4 – Replace any remaining non-ASCII characters with a space.
+    #----- 4 – Strip accents (é->e, ñ->n, ...) instead of nuking the letter: NFD
+    #----- decomposes accented chars into base+combining-mark, drop just the marks.
+    filename = "".join(c for c in unicodedata.normalize("NFD", filename) if not unicodedata.combining(c))
+
+    #----- 5 – Replace any remaining non-ASCII characters with a space.
     #----- Keep standard filename-safe characters: alphanumerics, . - _ ( ) [ ] ' " , : ! ? & + @
     filename = re.sub(r"[^\x20-\x7E]", " ", filename)
 
-    #----- 5 – Remove Telegram channel tags  (@ChannelName_ etc.)
+    #----- 6 – Remove Telegram channel tags  (@ChannelName_ etc.)
     filename = _CHANNEL_TAG_PATTERN.sub("", filename)
 
-    #----- 6 – Remove codec / source tags that clutter the title region
+    #----- 7 – Remove codec / source tags that clutter the title region
     filename = _CODEC_TAG_PATTERN.sub(" ", filename)
 
-    #----- 7 – Collapse multiple spaces; remove space before extension dot
+    #----- 8 – Collapse multiple spaces; remove space before extension dot
     filename = re.sub(r"\s+", " ", filename).strip().replace(" .", ".")
 
     return filename if filename else "unknown_file"
