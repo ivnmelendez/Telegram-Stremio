@@ -255,6 +255,9 @@ async def _list_vod_streams(category_id: str = None) -> list:
         #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - el cliente
         #----- arma su submenu de categorias con get_vod_categories, no escaneando
         #----- este dump, asi que duplicar aca solo infla el catalogo sin razon.
+        #----- category_ids expone TODAS las categorias (Todas + genero + Estrenos)
+        #----- para clientes que agrupan leyendo el dump sin filtrar en vez de pedir
+        #----- get_vod_streams por categoria.
         cat = category_id or primary_id or ALL_MOVIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
         name = m.get("title") or "Untitled"
@@ -270,6 +273,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
             "added": added,
             "is_adult": "0",
             "category_id": cat,
+            "category_ids": cat_ids,
             "container_extension": "mkv",
             "custom_sid": "",
             "direct_source": "",
@@ -292,7 +296,7 @@ async def _list_series(category_id: str = None) -> list:
         if category_id and category_id not in cat_ids:
             continue
         #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - mismo motivo
-        #----- que en _list_vod_streams.
+        #----- que en _list_vod_streams. category_ids: ver comentario equivalente ahi.
         cat = category_id or primary_id or ALL_SERIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
         out.append({
@@ -305,6 +309,7 @@ async def _list_series(category_id: str = None) -> list:
             "genre": ", ".join(s.get("genres") or []),
             "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
             "category_id": cat,
+            "category_ids": cat_ids,
             "rating": str(s.get("rating") or ""),
             "rating_5based": round((s.get("rating") or 0) / 2, 1),
         })
