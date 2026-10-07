@@ -1,6 +1,7 @@
 import asyncio
 import math
 import mimetypes
+import re
 import secrets
 import time
 from collections import deque
@@ -140,10 +141,23 @@ async def _lookup_title(stream_id_hash: str, decoded_name: str):
     return db_title or decoded_name
 
 
-#----- Derive a display file name and mime type from file properties
+_SPLIT_SUFFIX_RE = re.compile(r"\.\d{3,}$")
+
+
+#----- Derive a display file name and mime type from file properties. Split-part files
+#----- are stored in Telegram as "Movie.mkv.001" — if trusted as-is, Telegram reports a
+#----- generic mime for that raw chunk (it doesn't know ".001" is a video), which some
+#----- players (e.g. TiviMate/ExoPlayer) treat as "format unknown" and disable seeking
+#----- on, even though playback itself still works. Strip the split suffix first so the
+#----- real extension (.mkv) drives mime detection, same as a non-split file would.
 def _resolve_filename_mime(file_id):
     file_name = file_id.file_name or f"{secrets.token_hex(4)}.bin"
-    mime_type = file_id.mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    cleaned_name = _SPLIT_SUFFIX_RE.sub("", file_name)
+    if cleaned_name != file_name:
+        file_name = cleaned_name
+        mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    else:
+        mime_type = file_id.mime_type or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
     if "." not in file_name and "/" in mime_type:
         file_name = f"{file_name}.{mime_type.split('/')[1]}"
     return file_name, mime_type
