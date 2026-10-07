@@ -222,31 +222,32 @@ async def _list_vod_streams(category_id: str = None) -> list:
     for m in movies:
         imdb_id = m["imdb_id"]
         primary = _primary_movie_tag(m.get("genres") or [])
-        cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([_category_id("movie_genre", primary)] if primary else [])
-        #----- Una sola categoria por titulo (igual que el proveedor real): sin
-        #----- filtro devuelve las 2 entradas (Todas + su categoria), nunca mas.
-        target_cats = [category_id] if category_id else cat_ids
+        primary_id = _category_id("movie_genre", primary) if primary else None
+        cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if category_id and category_id not in cat_ids:
             continue
+        #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - el cliente
+        #----- arma su submenu de categorias con get_vod_categories, no escaneando
+        #----- este dump, asi que duplicar aca solo infla el catalogo sin razon.
+        cat = category_id or primary_id or ALL_MOVIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
         name = m.get("title") or "Untitled"
         added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
-        for cat in target_cats:
-            out.append({
-                "num": sid,
-                "name": name,
-                "stream_type": "movie",
-                "stream_id": sid,
-                "stream_icon": m.get("poster") or "",
-                "rating": str(m.get("rating") or ""),
-                "rating_5based": round((m.get("rating") or 0) / 2, 1),
-                "added": added,
-                "is_adult": "0",
-                "category_id": cat,
-                "container_extension": "mkv",
-                "custom_sid": "",
-                "direct_source": "",
-            })
+        out.append({
+            "num": sid,
+            "name": name,
+            "stream_type": "movie",
+            "stream_id": sid,
+            "stream_icon": m.get("poster") or "",
+            "rating": str(m.get("rating") or ""),
+            "rating_5based": round((m.get("rating") or 0) / 2, 1),
+            "added": added,
+            "is_adult": "0",
+            "category_id": cat,
+            "container_extension": "mkv",
+            "custom_sid": "",
+            "direct_source": "",
+        })
     return out
 
 
@@ -258,26 +259,27 @@ async def _list_series(category_id: str = None) -> list:
     for s in shows:
         imdb_id = s["imdb_id"]
         primary, _kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
-        cat_ids = [ALL_SERIES_CATEGORY_ID] + ([_category_id("series_tag", primary)] if primary else [])
-        #----- Una sola categoria por titulo (igual que el proveedor real).
-        target_cats = [category_id] if category_id else cat_ids
+        primary_id = _category_id("series_tag", primary) if primary else None
+        cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if category_id and category_id not in cat_ids:
             continue
+        #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - mismo motivo
+        #----- que en _list_vod_streams.
+        cat = category_id or primary_id or ALL_SERIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
-        for cat in target_cats:
-            out.append({
-                "num": sid,
-                "series_id": sid,
-                "name": s.get("title") or "Untitled",
-                "cover": s.get("poster") or "",
-                "cover_big": s.get("poster") or "",
-                "plot": s.get("description") or "",
-                "genre": ", ".join(s.get("genres") or []),
-                "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
-                "category_id": cat,
-                "rating": str(s.get("rating") or ""),
-                "rating_5based": round((s.get("rating") or 0) / 2, 1),
-            })
+        out.append({
+            "num": sid,
+            "series_id": sid,
+            "name": s.get("title") or "Untitled",
+            "cover": s.get("poster") or "",
+            "cover_big": s.get("poster") or "",
+            "plot": s.get("description") or "",
+            "genre": ", ".join(s.get("genres") or []),
+            "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
+            "category_id": cat,
+            "rating": str(s.get("rating") or ""),
+            "rating_5based": round((s.get("rating") or 0) / 2, 1),
+        })
     return out
 
 
