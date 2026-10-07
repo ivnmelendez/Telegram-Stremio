@@ -151,28 +151,32 @@ async def _list_vod_streams(category_id: str = None) -> list:
         if not imdb_id:
             continue
         genres = m.get("genres") or []
-        if category_id:
-            if not any(_category_id("movie_genre", g) == category_id for g in genres):
-                continue
-        primary_cat = _category_id("movie_genre", genres[0]) if genres else "0"
+        cat_ids = [_category_id("movie_genre", g) for g in genres] or ["0"]
+        #----- Sin filtro: una entrada por categoria a la que pertenece (asi el
+        #----- cliente arma su menu viendo TODAS las categorias reales, no solo
+        #----- la primera). Con filtro: una sola entrada, ya sabemos cual matchea.
+        target_cats = [category_id] if category_id else cat_ids
+        if category_id and category_id not in cat_ids:
+            continue
         sid = await db.upsert_xtream_stream_id(imdb_id, "movie")
         name = m.get("title") or "Untitled"
         added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
-        out.append({
-            "num": sid,
-            "name": name,
-            "stream_type": "movie",
-            "stream_id": sid,
-            "stream_icon": m.get("poster") or "",
-            "rating": str(m.get("rating") or ""),
-            "rating_5based": round((m.get("rating") or 0) / 2, 1),
-            "added": added,
-            "is_adult": "0",
-            "category_id": primary_cat,
-            "container_extension": "mkv",
-            "custom_sid": "",
-            "direct_source": "",
-        })
+        for cat in target_cats:
+            out.append({
+                "num": sid,
+                "name": name,
+                "stream_type": "movie",
+                "stream_id": sid,
+                "stream_icon": m.get("poster") or "",
+                "rating": str(m.get("rating") or ""),
+                "rating_5based": round((m.get("rating") or 0) / 2, 1),
+                "added": added,
+                "is_adult": "0",
+                "category_id": cat,
+                "container_extension": "mkv",
+                "custom_sid": "",
+                "direct_source": "",
+            })
     return out
 
 
@@ -183,24 +187,25 @@ async def _list_series(category_id: str = None) -> list:
         if not imdb_id:
             continue
         tags = (s.get("genres") or []) + (s.get("networks") or [])
-        if category_id:
-            if not any(_category_id("series_tag", t) == category_id for t in tags):
-                continue
-        primary_cat = _category_id("series_tag", tags[0]) if tags else "0"
+        cat_ids = [_category_id("series_tag", t) for t in tags] or ["0"]
+        target_cats = [category_id] if category_id else cat_ids
+        if category_id and category_id not in cat_ids:
+            continue
         sid = await db.upsert_xtream_stream_id(imdb_id, "tv")
-        out.append({
-            "num": sid,
-            "series_id": sid,
-            "name": s.get("title") or "Untitled",
-            "cover": s.get("poster") or "",
-            "cover_big": s.get("poster") or "",
-            "plot": s.get("description") or "",
-            "genre": ", ".join(s.get("genres") or []),
-            "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
-            "category_id": primary_cat,
-            "rating": str(s.get("rating") or ""),
-            "rating_5based": round((s.get("rating") or 0) / 2, 1),
-        })
+        for cat in target_cats:
+            out.append({
+                "num": sid,
+                "series_id": sid,
+                "name": s.get("title") or "Untitled",
+                "cover": s.get("poster") or "",
+                "cover_big": s.get("poster") or "",
+                "plot": s.get("description") or "",
+                "genre": ", ".join(s.get("genres") or []),
+                "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
+                "category_id": cat,
+                "rating": str(s.get("rating") or ""),
+                "rating_5based": round((s.get("rating") or 0) / 2, 1),
+            })
     return out
 
 
