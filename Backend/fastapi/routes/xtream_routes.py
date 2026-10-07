@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from Backend import db
 from Backend.fastapi.routes.stremio_routes import get_resolution_priority, parse_size_to_bytes, stream_res_label
 from Backend.fastapi.security.tokens import verify_token
+from Backend.helper.cf_stream import cf_enabled, cf_stream_url
 from Backend.helper.passwords import verify_password
 from Backend.helper.settings_manager import SettingsManager
 
@@ -83,6 +84,8 @@ def _pick_best_quality(telegram_list: list, token_data: dict) -> dict | None:
 
 
 def _dl_redirect_url(token: str, quality_id: str) -> str:
+    if cf_enabled() and SettingsManager.current().cf_stream_mode in ("cloudflare", "both"):
+        return cf_stream_url(token, quality_id, "video.mkv")
     return f"{SettingsManager.current().base_url}/dl/{token}/{quality_id}/video.mkv"
 
 
