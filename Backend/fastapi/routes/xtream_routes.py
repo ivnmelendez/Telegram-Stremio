@@ -149,7 +149,8 @@ async def _series_info(series_id: int) -> dict:
 
     seasons_out = []
     episodes_out = {}
-    for season in tv_doc.get("seasons", []):
+    sorted_seasons = sorted(tv_doc.get("seasons", []), key=lambda s: s.get("season_number") or 0)
+    for season in sorted_seasons:
         snum = season.get("season_number")
         seasons_out.append({
             "season_number": snum,
@@ -157,7 +158,8 @@ async def _series_info(series_id: int) -> dict:
             "episode_count": len(season.get("episodes", [])),
         })
         eps = []
-        for ep in season.get("episodes", []):
+        sorted_episodes = sorted(season.get("episodes", []), key=lambda e: e.get("episode_number") or 0)
+        for ep in sorted_episodes:
             if not ep.get("telegram"):
                 continue
             enum = ep.get("episode_number")
