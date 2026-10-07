@@ -267,17 +267,18 @@ async def _list_vod_streams(category_id: str = None) -> list:
         cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else []) + ([estreno_id] if estreno_id else [])
         if category_id and category_id not in cat_ids:
             continue
-        #----- Una sola entrada por titulo (genero/plataforma gana el campo unico,
-        #----- igual que un proveedor real) salvo que sea Estreno: ahi se agrega UNA
-        #----- fila extra con category_id=estreno_id, porque clientes como UHF
-        #----- arman sus categorias escaneando category_id del dump sin filtro en vez
-        #----- de llamar get_vod_streams por categoria. Solo duplica el subconjunto
-        #----- chico de estrenos, no todo el catalogo (eso ya caused catalogos lentos
-        #----- antes). category_ids sigue listando todo para clientes que si filtran.
+        #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - probamos
+        #----- duplicar fila para Estrenos (para clientes tipo UHF que escanean
+        #----- category_id del dump sin filtro) pero rompia "Recien anadidos" en
+        #----- esos mismos clientes (tambien escanean el dump completo y no
+        #----- dedupean por stream_id). category_ids sigue listando todo para
+        #----- clientes que filtran por categoria (TiviMate); Estrenos no se ve en
+        #----- clientes que solo escanean category_id singular, es el trade-off.
+        cat = category_id or primary_id or ALL_MOVIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
         name = m.get("title") or "Untitled"
         added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
-        base = {
+        out.append({
             "num": sid,
             "name": name,
             "stream_type": "movie",
@@ -287,17 +288,12 @@ async def _list_vod_streams(category_id: str = None) -> list:
             "rating_5based": round((m.get("rating") or 0) / 2, 1),
             "added": added,
             "is_adult": "0",
+            "category_id": cat,
             "category_ids": cat_ids,
             "container_extension": "mkv",
             "custom_sid": "",
             "direct_source": "",
-        }
-        if category_id:
-            out.append({**base, "category_id": category_id})
-        else:
-            out.append({**base, "category_id": primary_id or ALL_MOVIES_CATEGORY_ID})
-            if estreno_id:
-                out.append({**base, "category_id": estreno_id})
+        })
     return out
 
 
@@ -315,10 +311,11 @@ async def _list_series(category_id: str = None) -> list:
         cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else []) + ([estreno_id] if estreno_id else [])
         if category_id and category_id not in cat_ids:
             continue
-        #----- Una sola entrada por titulo (mismo motivo que en _list_vod_streams),
-        #----- mas una fila extra si es Estreno - ver comentario equivalente ahi.
+        #----- Una sola entrada por titulo, SIEMPRE - mismo trade-off que en
+        #----- _list_vod_streams (ver comentario ahi).
+        cat = category_id or primary_id or ALL_SERIES_CATEGORY_ID
         sid = id_map[f"{imdb_id}:None:None"]
-        base = {
+        out.append({
             "num": sid,
             "series_id": sid,
             "name": s.get("title") or "Untitled",
@@ -327,16 +324,11 @@ async def _list_series(category_id: str = None) -> list:
             "plot": s.get("description") or "",
             "genre": ", ".join(s.get("genres") or []),
             "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
+            "category_id": cat,
             "category_ids": cat_ids,
             "rating": str(s.get("rating") or ""),
             "rating_5based": round((s.get("rating") or 0) / 2, 1),
-        }
-        if category_id:
-            out.append({**base, "category_id": category_id})
-        else:
-            out.append({**base, "category_id": primary_id or ALL_SERIES_CATEGORY_ID})
-            if estreno_id:
-                out.append({**base, "category_id": estreno_id})
+        })
     return out
 
 
