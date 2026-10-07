@@ -6,8 +6,17 @@ from fastapi import Request
 from Backend.helper.custom_dl import ByteStreamer
 from Backend.logger import LOGGER
 
+#----- Part byte-sizes never change, so once any client has looked one up it's reusable
+#----- forever by every future request/client — avoids re-hitting Telegram for all N parts
+#----- on every single request (incl. every seek), which is what made seeking split/.001
+#----- files slow enough to time out in some players (size-only; FileId stays per-client
+#----- since it's fetched/cached separately by ByteStreamer.get_file_properties()).
+_part_size_cache: Dict[Tuple[int, int], int] = {}
 
-#----- Fetch metadata for each split part and compute cumulative offsets -> (parts, total_size)
+
+#----- Compute cumulative offsets for each split part -> (parts, total_size). Only the
+#----- first part's FileId is resolved eagerly (callers need it for filename/mime); the
+#----- rest resolve lazily in virtual_stream_generator, only for parts actually read.
 async def resolve_virtual_parts(
     parts_payload: List[dict],
     streamer: ByteStreamer,
@@ -19,13 +28,18 @@ async def resolve_virtual_parts(
         raw_chat = int(p["chat_id"])
         chat_id = int(f"-100{raw_chat}") if prefix_100 and raw_chat > 0 else raw_chat
         msg_id = int(p["msg_id"])
-        file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
-        size = file_id.file_size
+        cache_key = (chat_id, msg_id)
+        size = _part_size_cache.get(cache_key)
+        file_id = None
+        if size is None or idx == 0:
+            file_id = await streamer.get_file_properties(chat_id=chat_id, message_id=msg_id)
+            size = file_id.file_size
+            _part_size_cache[cache_key] = size
         parts.append({
             "index": idx,
             "chat_id": chat_id,
             "msg_id": msg_id,
-            "file_id": file_id,
+            "file_id": file_id,  #----- None on a size-cache hit; resolved lazily when actually read
             "size": size,
             "cum_start": cum,
         })
@@ -68,6 +82,9 @@ async def virtual_stream_generator(
         first_part_cut = local_start - offset
         last_part_cut = (local_end % chunk_size) + 1
         part_count = math.ceil(local_end / chunk_size) - math.floor(offset / chunk_size)
+
+        if part["file_id"] is None:
+            part["file_id"] = await streamer.get_file_properties(chat_id=part["chat_id"], message_id=part["msg_id"])
 
         body_gen = await streamer.prefetch_stream(
             file_id=part["file_id"],
