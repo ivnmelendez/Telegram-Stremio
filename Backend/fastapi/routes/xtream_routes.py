@@ -1,4 +1,5 @@
 import time
+import zlib
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -89,25 +90,65 @@ def _dl_redirect_url(token: str, quality_id: str) -> str:
     return f"{SettingsManager.current().base_url}/dl/{token}/{quality_id}/video.mkv"
 
 
-async def _list_vod_streams() -> list:
+#----- Deterministic category id for a genre/platform name. Same scheme as
+#----- upsert_xtream_stream_id: stable across requests/restarts, no DB table needed.
+def _category_id(prefix: str, name: str) -> str:
+    return str(zlib.crc32(f"{prefix}:{name}".encode()) & 0x7FFFFFFF)
+
+
+async def _all_movies() -> list:
     data = await db.sort_movies([("updated_on", "desc")], 1, CATALOG_SIZE)
+    return data.get("movies", [])
+
+
+async def _all_tv_shows() -> list:
+    data = await db.sort_tv_shows([("updated_on", "desc")], 1, CATALOG_SIZE)
+    return data.get("tv_shows", [])
+
+
+#----- Distinct genres across the movie catalog -> [(name, category_id), ...]
+async def _movie_categories() -> list:
+    genres = set()
+    for m in await _all_movies():
+        genres.update(m.get("genres") or [])
+    return sorted(genres)
+
+
+#----- Distinct genres UNION streaming platforms across the series catalog —
+#----- both live as flat categories in the same list, same as real Xtream panels do.
+async def _series_categories() -> list:
+    tags = set()
+    for s in await _all_tv_shows():
+        tags.update(s.get("genres") or [])
+        tags.update(s.get("networks") or [])
+    return sorted(tags)
+
+
+async def _list_vod_streams(category_id: str = None) -> list:
     out = []
-    for m in data.get("movies", []):
+    for m in await _all_movies():
         imdb_id = m.get("imdb_id")
         if not imdb_id:
             continue
+        genres = m.get("genres") or []
+        if category_id:
+            if not any(_category_id("movie_genre", g) == category_id for g in genres):
+                continue
+        primary_cat = _category_id("movie_genre", genres[0]) if genres else "0"
         sid = await db.upsert_xtream_stream_id(imdb_id, "movie")
+        name = m.get("title") or "Untitled"
+        added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
         out.append({
             "num": sid,
-            "name": m.get("title") or "Untitled",
+            "name": name,
             "stream_type": "movie",
             "stream_id": sid,
             "stream_icon": m.get("poster") or "",
             "rating": str(m.get("rating") or ""),
             "rating_5based": round((m.get("rating") or 0) / 2, 1),
-            "added": str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else "",
+            "added": added,
             "is_adult": "0",
-            "category_id": "1",
+            "category_id": primary_cat,
             "container_extension": "mkv",
             "custom_sid": "",
             "direct_source": "",
@@ -115,13 +156,17 @@ async def _list_vod_streams() -> list:
     return out
 
 
-async def _list_series() -> list:
-    data = await db.sort_tv_shows([("updated_on", "desc")], 1, CATALOG_SIZE)
+async def _list_series(category_id: str = None) -> list:
     out = []
-    for s in data.get("tv_shows", []):
+    for s in await _all_tv_shows():
         imdb_id = s.get("imdb_id")
         if not imdb_id:
             continue
+        tags = (s.get("genres") or []) + (s.get("networks") or [])
+        if category_id:
+            if not any(_category_id("series_tag", t) == category_id for t in tags):
+                continue
+        primary_cat = _category_id("series_tag", tags[0]) if tags else "0"
         sid = await db.upsert_xtream_stream_id(imdb_id, "tv")
         out.append({
             "num": sid,
@@ -132,7 +177,7 @@ async def _list_series() -> list:
             "plot": s.get("description") or "",
             "genre": ", ".join(s.get("genres") or []),
             "releaseDate": f"{s.get('release_year')}-01-01" if s.get("release_year") else "",
-            "category_id": "2",
+            "category_id": primary_cat,
             "rating": str(s.get("rating") or ""),
             "rating_5based": round((s.get("rating") or 0) / 2, 1),
         })
@@ -208,10 +253,13 @@ async def _vod_info(vod_id: int) -> dict:
     genres = movie.get("genres") or []
     rating = movie.get("rating") or 0
     release_year = movie.get("release_year")
+    tmdb_id = movie.get("tmdb_id")
+    name = movie.get("title")
+    category_id = _category_id("movie_genre", genres[0]) if genres else "0"
     return {
         "info": {
-            "name": movie.get("title"),
-            "o_name": movie.get("original_title") or movie.get("title"),
+            "name": name,
+            "o_name": movie.get("original_title") or name,
             "movie_image": poster,
             "cover_big": poster,
             "backdrop_path": [movie.get("backdrop")] if movie.get("backdrop") else [],
@@ -220,9 +268,16 @@ async def _vod_info(vod_id: int) -> dict:
             "genre": ", ".join(genres) if genres else "",
             "rating": str(rating),
             "releasedate": f"{release_year}-01-01" if release_year else "",
-            "tmdb_id": str(movie.get("tmdb_id") or ""),
+            "tmdb_id": str(tmdb_id or ""),
+            "tmdb_url": f"https://www.themoviedb.org/movie/{tmdb_id}" if tmdb_id else "",
         },
-        "movie_data": {"stream_id": vod_id, "container_extension": "mkv"},
+        "movie_data": {
+            "stream_id": vod_id,
+            "name": name,
+            "added": "",
+            "category_id": category_id,
+            "container_extension": "mkv",
+        },
     }
 
 
@@ -248,15 +303,17 @@ async def player_api(request: Request):
         return {"user_info": _user_info(token_data, username), "server_info": _server_info()}
 
     if action == "get_vod_categories":
-        return [{"category_id": "1", "category_name": "Películas", "parent_id": 0}]
+        genres = await _movie_categories()
+        return [{"category_id": _category_id("movie_genre", g), "category_name": g, "parent_id": 0} for g in genres]
     if action == "get_series_categories":
-        return [{"category_id": "2", "category_name": "Series", "parent_id": 0}]
+        tags = await _series_categories()
+        return [{"category_id": _category_id("series_tag", t), "category_name": t, "parent_id": 0} for t in tags]
     if action in ("get_live_categories", "get_live_streams"):
         return []
     if action == "get_vod_streams":
-        return await _list_vod_streams()
+        return await _list_vod_streams(params.get("category_id"))
     if action == "get_series":
-        return await _list_series()
+        return await _list_series(params.get("category_id"))
     if action == "get_vod_info":
         try:
             vod_id = int(params.get("vod_id", 0))
