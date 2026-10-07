@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from Backend import db
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.analytics import client_ip_from, record_stream_start
-from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS, ByteStreamer
+from Backend.helper.custom_dl import ACTIVE_STREAMS, RECENT_STREAMS, ByteStreamer, count_active_streams
 from Backend.helper.encrypt import decode_string
 from Backend.helper.pyro import get_thumb_download_target
 from Backend.helper.utils import track_usage
@@ -259,6 +259,12 @@ async def subtitle_handler(token: str, id: str, name: str, token_data: dict = De
 @router.head("/dl/{token}/{id}/{name}")
 async def stream_handler(request: Request, token: str, id: str, name: str, token_data: dict = Depends(verify_token)):
     if request.method != "HEAD":
+        max_streams = token_data.get("max_concurrent_streams") if token_data else None
+        if max_streams and not token_data.get("is_admin") and count_active_streams(token) >= max_streams:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Max simultaneous streams reached ({max_streams}). Close another device first.",
+            )
         asyncio.create_task(record_stream_start(
             token,
             token_data.get("name") if token_data else None,

@@ -2208,7 +2208,7 @@ class Database:
     #----- API Token Methods
     #-----
 
-    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, user_id: int = None, subscription_exempt: bool = False) -> dict:
+    async def add_api_token(self, name: str, daily_limit_gb: float = None, monthly_limit_gb: float = None, user_id: int = None, subscription_exempt: bool = False, max_concurrent_streams: int = None) -> dict:
         #----- If a user_id is provided, return existing token if already created
         if user_id:
             existing = await self.dbs["tracking"]["api_tokens"].find_one({"user_id": user_id})
@@ -2226,6 +2226,7 @@ class Database:
             "subscription_exempt": bool(subscription_exempt),
             "expires_at": None,
             "created_at": datetime.utcnow(),
+            "max_concurrent_streams": max_concurrent_streams if max_concurrent_streams else None,
             "limits": {
                 "daily_limit_gb": daily_limit_gb if daily_limit_gb else 0,
                 "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0
@@ -2408,6 +2409,14 @@ class Database:
                     "monthly_limit_gb": monthly_limit_gb if monthly_limit_gb else 0
                 }
             }}
+        )
+        return result.modified_count > 0
+
+    #----- Set (or clear, with None) a token's max simultaneous active streams
+    async def set_token_concurrency(self, token: str, max_concurrent_streams: Optional[int]) -> bool:
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token},
+            {"$set": {"max_concurrent_streams": max_concurrent_streams if max_concurrent_streams else None}}
         )
         return result.modified_count > 0
 

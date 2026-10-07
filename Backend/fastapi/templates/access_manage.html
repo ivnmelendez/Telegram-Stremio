@@ -255,6 +255,15 @@
                     <input type="number" id="create-monthly" value="0" min="0" step="0.1" class="glass-input">
                 </div>
             </div>
+            <div class="modal-field">
+                <label>Max Simultaneous Streams</label>
+                <select id="create-concurrent" class="glass-select">
+                    <option value="0">Unlimited</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                </select>
+            </div>
             <label class="flex items-center gap-3 text-sm section-title cursor-pointer">
                 <input type="checkbox" id="create-lifetime" class="w-4 h-4" checked>
                 Never expires <span class="text-soft text-xs">(no expiry date; works even when subscription mode is ON)</span>
@@ -288,6 +297,15 @@
                 <label>Monthly (GB)</label>
                 <input type="number" id="limits-monthly" min="0" step="0.1" class="glass-input">
             </div>
+        </div>
+        <div class="modal-field mt-3">
+            <label>Max Simultaneous Streams</label>
+            <select id="limits-concurrent" class="glass-select">
+                <option value="0">Unlimited</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+            </select>
         </div>
         <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6">
             <button onclick="closeModal('limits-modal')" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">Cancel</button>
@@ -412,9 +430,11 @@
     function usageHtml(t) {
         const dl = t.daily_limit_gb ? t.daily_limit_gb + ' GB' : '∞';
         const ml = t.monthly_limit_gb ? t.monthly_limit_gb + ' GB' : '∞';
+        const cs = t.max_concurrent_streams ? t.max_concurrent_streams : '∞';
         return `<div class="usage-box text-soft">
             <div><span class="section-title font-semibold">Day:</span> ${fmtBytes(t.daily_bytes)} / ${dl}</div>
             <div><span class="section-title font-semibold">Mon:</span> ${fmtBytes(t.monthly_bytes)} / ${ml}</div>
+            <div><span class="section-title font-semibold">Streams:</span> ${cs}</div>
         </div>`;
     }
 
@@ -431,7 +451,7 @@
         const tokenArg = t.token ? escHtml(t.token) : '';
 
         if (t.has_token) {
-            btns += `<button onclick="openLimitsModal('${tokenArg}', ${t.daily_limit_gb || 0}, ${t.monthly_limit_gb || 0})" class="action-chip glass-btn">Limits</button>`;
+            btns += `<button onclick="openLimitsModal('${tokenArg}', ${t.daily_limit_gb || 0}, ${t.monthly_limit_gb || 0}, ${t.max_concurrent_streams || 0})" class="action-chip glass-btn">Limits</button>`;
         }
 
         if (subEnabled) {
@@ -583,6 +603,7 @@
         document.getElementById('create-name').value = '';
         document.getElementById('create-daily').value = 0;
         document.getElementById('create-monthly').value = 0;
+        document.getElementById('create-concurrent').value = 0;
         document.getElementById('create-lifetime').checked = true;
         openModal('create-modal');
     }
@@ -594,6 +615,7 @@
             name,
             daily_limit_gb: Number(document.getElementById('create-daily').value || 0),
             monthly_limit_gb: Number(document.getElementById('create-monthly').value || 0),
+            max_concurrent_streams: Number(document.getElementById('create-concurrent').value || 0),
             subscription_exempt: document.getElementById('create-lifetime').checked,
         };
         try {
@@ -603,10 +625,11 @@
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
     }
 
-    function openLimitsModal(token, daily, monthly) {
+    function openLimitsModal(token, daily, monthly, maxConcurrent) {
         document.getElementById('limits-token').value = token;
         document.getElementById('limits-daily').value = daily || 0;
         document.getElementById('limits-monthly').value = monthly || 0;
+        document.getElementById('limits-concurrent').value = maxConcurrent || 0;
         openModal('limits-modal');
     }
 
@@ -615,6 +638,7 @@
         const payload = {
             daily_limit_gb: Number(document.getElementById('limits-daily').value || 0),
             monthly_limit_gb: Number(document.getElementById('limits-monthly').value || 0),
+            max_concurrent_streams: Number(document.getElementById('limits-concurrent').value || 0),
         };
         try {
             const resp = await fetch('/api/tokens/' + encodeURIComponent(token), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });

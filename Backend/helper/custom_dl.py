@@ -61,6 +61,16 @@ def _ensure_stale_cleaner():
         asyncio.create_task(_cleanup_stale_streams())
 
 
+#----- Count currently active streams belonging to a given API token
+def count_active_streams(token: str) -> int:
+    if not token:
+        return 0
+    return sum(
+        1 for entry in ACTIVE_STREAMS.values()
+        if (entry.get("meta") or {}).get("token") == token
+    )
+
+
 #----- Telegram file byte streamer with prefetch, multi-client parallelism, and telemetry
 class ByteStreamer:
     CHUNK_SIZE = 1024 * 1024

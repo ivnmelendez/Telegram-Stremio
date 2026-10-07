@@ -346,6 +346,15 @@ def _parse_limit(val):
         return None
 
 
+#----- Parse a max-concurrent-streams value (1/2/3) into a positive int, or None (unlimited)
+def _parse_concurrency(val):
+    try:
+        v = int(val)
+        return v if v > 0 else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 async def create_token_api(payload: dict):
     try:
         token_name = payload.get("name")
@@ -357,6 +366,7 @@ async def create_token_api(payload: dict):
             _parse_limit(payload.get("daily_limit_gb")),
             _parse_limit(payload.get("monthly_limit_gb")),
             subscription_exempt=bool(payload.get("subscription_exempt")),
+            max_concurrent_streams=_parse_concurrency(payload.get("max_concurrent_streams")),
         )
         return new_token
     except HTTPException:
@@ -428,6 +438,8 @@ async def update_token_limits_api(token: str, payload: dict):
             _parse_limit(daily_limit),
             _parse_limit(monthly_limit)
         )
+        if "max_concurrent_streams" in payload:
+            await db.set_token_concurrency(token, _parse_concurrency(payload.get("max_concurrent_streams")))
         return {"message": "Limits updated successfully"}
 
     except Exception as e:
@@ -878,6 +890,7 @@ async def get_all_tokens_api() -> dict:
                 "sub_status": sub_status,
                 "daily_limit_gb": limits.get("daily_limit_gb") or 0,
                 "monthly_limit_gb": limits.get("monthly_limit_gb") or 0,
+                "max_concurrent_streams": token_doc.get("max_concurrent_streams") or 0,
                 "daily_bytes": (usage.get("daily") or {}).get("bytes", 0),
                 "monthly_bytes": (usage.get("monthly") or {}).get("bytes", 0),
                 "addon_url": (
