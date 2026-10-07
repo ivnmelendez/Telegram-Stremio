@@ -185,6 +185,30 @@ async def _series_categories_set() -> tuple:
     return genre_tags, platform_tags
 
 
+def _current_year() -> int:
+    return datetime.utcnow().year
+
+
+#----- "Estrenos <year>" is an EXTRA tag on top of a title's primary category
+#----- (not instead of it) - a title can match both "Todas" + its genre/platform
+#----- + Estrenos at once. Safe: filtered requests just check membership, and the
+#----- unfiltered dump always emits one entry regardless of how many tags exist.
+def _estrenos_movie_category_id(year: int) -> str:
+    return _category_id("movie_special", f"estrenos_{year}")
+
+
+def _estrenos_series_category_id(year: int) -> str:
+    return _category_id("series_special", f"estrenos_{year}")
+
+
+async def _has_estrenos_movies(year: int) -> bool:
+    return any((m.get("release_year") == year) for m in await _all_movies())
+
+
+async def _has_estrenos_series(year: int) -> bool:
+    return any((s.get("release_year") == year) for s in await _all_tv_shows())
+
+
 #----- Visual formatting seen on a real Xtream provider's series categories —
 #----- colored square emoji + "+" instead of "Plus". Display-only: category_id
 #----- is always computed from the raw name, so this is safe to extend anytime.
@@ -217,13 +241,15 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- One round-trip for every stream id in this response, instead of one
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
+    year = _current_year()
 
     out = []
     for m in movies:
         imdb_id = m["imdb_id"]
         primary = _primary_movie_tag(m.get("genres") or [])
         primary_id = _category_id("movie_genre", primary) if primary else None
-        cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
+        estreno_id = _estrenos_movie_category_id(year) if m.get("release_year") == year else None
+        cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else []) + ([estreno_id] if estreno_id else [])
         if category_id and category_id not in cat_ids:
             continue
         #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - el cliente
@@ -254,13 +280,15 @@ async def _list_vod_streams(category_id: str = None) -> list:
 async def _list_series(category_id: str = None) -> list:
     shows = [s for s in await _all_tv_shows() if s.get("imdb_id")]
     id_map = await db.upsert_xtream_stream_ids_bulk([(s["imdb_id"], "tv", None, None) for s in shows])
+    year = _current_year()
 
     out = []
     for s in shows:
         imdb_id = s["imdb_id"]
         primary, _kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
         primary_id = _category_id("series_tag", primary) if primary else None
-        cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
+        estreno_id = _estrenos_series_category_id(year) if s.get("release_year") == year else None
+        cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else []) + ([estreno_id] if estreno_id else [])
         if category_id and category_id not in cat_ids:
             continue
         #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - mismo motivo
@@ -416,7 +444,14 @@ async def player_api(request: Request):
 
     if action == "get_vod_categories":
         genres = await _movie_categories_set()
+        year = _current_year()
         cats = [{"category_id": ALL_MOVIES_CATEGORY_ID, "category_name": ALL_MOVIES_CATEGORY_NAME, "parent_id": 0}]
+        if await _has_estrenos_movies(year):
+            cats.append({
+                "category_id": _estrenos_movie_category_id(year),
+                "category_name": f"🎬 Estrenos {year}",
+                "parent_id": 0,
+            })
         cats += [
             {"category_id": _category_id("movie_genre", g), "category_name": _display_name(g), "parent_id": 0}
             for g in sorted(genres)
@@ -424,7 +459,14 @@ async def player_api(request: Request):
         return cats
     if action == "get_series_categories":
         genres, networks = await _series_categories_set()
+        year = _current_year()
         cats = [{"category_id": ALL_SERIES_CATEGORY_ID, "category_name": ALL_SERIES_CATEGORY_NAME, "parent_id": 0}]
+        if await _has_estrenos_series(year):
+            cats.append({
+                "category_id": _estrenos_series_category_id(year),
+                "category_name": f"🎬 Estrenos {year}",
+                "parent_id": 0,
+            })
         cats += [
             {"category_id": _category_id("series_tag", p), "category_name": _display_name(p), "parent_id": 0}
             for p in _ordered_platforms(networks)
