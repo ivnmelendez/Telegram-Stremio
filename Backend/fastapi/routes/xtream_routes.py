@@ -114,6 +114,26 @@ async def _movie_categories() -> list:
     return sorted(genres)
 
 
+#----- Visual formatting seen on a real Xtream provider's series categories —
+#----- colored square emoji + "+" instead of "Plus". Display-only: category_id
+#----- is always computed from the raw name, so this is safe to extend anytime.
+_PLATFORM_DISPLAY = {
+    "Netflix": "🟥 Netflix",
+    "Disney Plus": "🟦 Disney+",
+    "Prime Video": "🟦 Prime Video",
+    "Apple TV": "⬛ Apple TV+",
+    "HBO Max": "🟪 HBO Max",
+    "Paramount Plus": "🟦 Paramount+",
+    "ViX": "🟧 ViX",
+    "Hulu": "🟩 Hulu",
+    "Peacock": "🟨 Peacock",
+}
+
+
+def _display_name(name: str) -> str:
+    return _PLATFORM_DISPLAY.get(name, name)
+
+
 #----- Distinct genres UNION streaming platforms across the series catalog —
 #----- both live as flat categories in the same list, same as real Xtream panels do.
 async def _series_categories() -> list:
@@ -307,7 +327,7 @@ async def player_api(request: Request):
         return [{"category_id": _category_id("movie_genre", g), "category_name": g, "parent_id": 0} for g in genres]
     if action == "get_series_categories":
         tags = await _series_categories()
-        return [{"category_id": _category_id("series_tag", t), "category_name": t, "parent_id": 0} for t in tags]
+        return [{"category_id": _category_id("series_tag", t), "category_name": _display_name(t), "parent_id": 0} for t in tags]
     if action in ("get_live_categories", "get_live_streams"):
         return []
     if action == "get_vod_streams":
