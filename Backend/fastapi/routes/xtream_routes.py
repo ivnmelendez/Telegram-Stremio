@@ -350,9 +350,15 @@ async def _list_series(category_id: str = None) -> list:
     out = []
     for s in shows:
         imdb_id = s["imdb_id"]
-        primary, _kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
-        primary = _effective_tag(overrides, primary)
-        primary_id = _category_id("series_tag", primary) if primary else None
+        primary, kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
+        effective = _effective_tag(overrides, primary)
+        #----- Genero crudo ya no se lista como categoria propia (solo
+        #----- plataforma) - si no fue fusionado a mano en una categoria
+        #----- manual, cae al catch-all en vez de un category_id huerfano
+        #----- que el cliente no reconoce ("Unknown").
+        if effective == primary and kind != "platform":
+            effective = None
+        primary_id = _category_id("series_tag", effective) if effective else None
         cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if category_id and category_id not in cat_ids:
             continue

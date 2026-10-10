@@ -66,15 +66,21 @@ _PLATFORM_ALIASES = (
 
 
 def _normalize_provider_name(name: str) -> str:
-    low = name.lower()
-    for needle, canonical in _PLATFORM_ALIASES:
-        if needle in low:
-            return canonical
+    #----- Strip reseller-channel suffixes FIRST (ej. "Paramount Plus Apple TV
+    #----- Channel" means Paramount+ sold via Apple TV's channel marketplace,
+    #----- not Apple TV content) - otherwise the alias substring check below
+    #----- would match "apple tv" inside that string and misidentify it.
     prev = None
     while prev != name:
         prev = name
         name = _PROVIDER_SUFFIX_RE.sub("", name)
-    return name.strip()
+    name = name.strip()
+
+    low = name.lower()
+    for needle, canonical in _PLATFORM_ALIASES:
+        if needle in low:
+            return canonical
+    return name
 
 
 def tmdb_api_key() -> str:
@@ -324,6 +330,7 @@ def build_movie_payload(movie, quality, encoded_string) -> dict:
         "title_english": eng,
         "original_title": orig if orig != title else "",
         "year": getattr(release, "year", 0) if release else 0,
+        "release_date": release.isoformat() if release else "",
         "rate": getattr(movie, "vote_average", 0) or 0,
         "description": movie.overview or "",
         "poster": format_tmdb_image(movie.poster_path),
