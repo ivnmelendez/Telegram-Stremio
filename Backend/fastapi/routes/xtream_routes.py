@@ -321,6 +321,18 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
 
+    #----- A movie that belongs to its genre AND Estrenos needs a DIFFERENT
+    #----- stream_id for the Estrenos placement - IPTV clients index VOD items
+    #----- by stream_id across every category list they fetch, so reusing the
+    #----- same id makes the second category's copy look "already seen" and it
+    #----- never renders there (confirmed: server sends it, client drops it).
+    #----- Both ids resolve back to the same imdb_id at playback time.
+    estreno_id_map = {}
+    if category_id == ESTRENOS_CATEGORY_ID:
+        estreno_id_map = await db.upsert_xtream_stream_ids_bulk(
+            [(m["imdb_id"], "movie", None, "estrenos") for m in movies if _is_estreno(m)]
+        )
+
     out = []
     for m in movies:
         imdb_id = m["imdb_id"]
@@ -335,7 +347,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
         #----- arma su submenu de categorias con get_vod_categories, no escaneando
         #----- este dump, asi que duplicar aca solo infla el catalogo sin razon.
         cat = category_id or primary_id or ALL_MOVIES_CATEGORY_ID
-        sid = id_map[f"{imdb_id}:None:None"]
+        sid = estreno_id_map[f"{imdb_id}:None:estrenos"] if cat == ESTRENOS_CATEGORY_ID else id_map[f"{imdb_id}:None:None"]
         name = m.get("title") or "Untitled"
         added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
         out.append({
