@@ -62,6 +62,7 @@ class TVShowSchema(BaseModel):
     origin_country: Optional[List[str]] = Field(default_factory=list)
     production_countries: Optional[List[str]] = Field(default_factory=list)
     watch_providers: Optional[List[str]] = Field(default_factory=list)
+    networks: Optional[List[str]] = Field(default_factory=list)
     auto_tags: Optional[List[str]] = Field(default_factory=list)
     auto_catalog: Optional[dict] = None
 

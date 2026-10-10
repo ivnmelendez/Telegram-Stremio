@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% block title %}Xtream Categorías{% endblock %}
+
+{% block content %}
+<style>
+    .access-shell { display: flex; flex-direction: column; gap: 1.5rem; }
+
+    .page-hero, .section-panel, .table-shell, .stat-card, .mobile-token-card, .empty-state, .modal-glass {
+        background: color-mix(in srgb, var(--card) 50%, transparent);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid var(--border);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+    }
+    .page-hero, .section-panel, .table-shell, .stat-card, .mobile-token-card, .empty-state { border-radius: 1.5rem; }
+
+    .hero-glow { position: relative; overflow: hidden; isolation: isolate; }
+    .hero-glow::before {
+        content: ""; position: absolute; inset: -30% auto auto -10%;
+        width: 16rem; height: 16rem; border-radius: 9999px;
+        background: color-mix(in srgb, var(--primary) 18%, transparent);
+        filter: blur(52px); z-index: -1; pointer-events: none;
+    }
+    .hero-glow::after {
+        content: ""; position: absolute; inset: auto -4% -34% auto;
+        width: 14rem; height: 14rem; border-radius: 9999px;
+        background: color-mix(in srgb, var(--accent) 16%, transparent);
+        filter: blur(52px); z-index: -1; pointer-events: none;
+    }
+
+    .section-title { color: var(--text); }
+    .section-muted { color: var(--text-sec); }
+
+    .glass-btn {
+        border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+        background: color-mix(in srgb, var(--card) 92%, var(--bg));
+        color: var(--text); transition: all 0.25s ease; box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+    }
+    .glass-btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--primary) 35%, var(--border)); }
+
+    .glass-btn-primary {
+        background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 88%, white 8%), color-mix(in srgb, var(--accent) 82%, var(--primary) 18%));
+        color: white; border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent);
+    }
+    .glass-btn-primary:hover { filter: brightness(1.05); }
+    .glass-btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: #fff; border-color: transparent; }
+
+    .tab-btn.active { background: color-mix(in srgb, var(--primary) 85%, white 8%); color: #fff; }
+
+    .glass-input, .glass-select {
+        border-radius: 0.8rem;
+        border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+        background: color-mix(in srgb, var(--bg) 68%, transparent);
+        color: var(--text); padding: 0.55rem 0.7rem; outline: none; transition: all 0.2s ease;
+    }
+    .glass-input:focus, .glass-select:focus {
+        border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+        box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent);
+    }
+
+    .table-shell { overflow: hidden; }
+    .access-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .access-table thead th {
+        background: color-mix(in srgb, var(--bg) 65%, transparent);
+        color: var(--text-sec); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em;
+        border-bottom: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+    }
+    .access-table tbody tr { transition: background 0.22s ease; }
+    .access-table tbody tr:hover { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+    .access-table td { border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); color: var(--text); vertical-align: middle; }
+    .access-table tbody tr:last-child td { border-bottom: none; }
+
+    .origin-badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.65rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 700; }
+    .origin-auto { background: color-mix(in srgb, var(--primary) 14%, transparent); color: var(--primary); }
+    .origin-manual { background: color-mix(in srgb, #f59e0b 16%, transparent); color: #fde68a; }
+
+    .action-chip { border-radius: 9999px; padding: 0.4rem 0.75rem; font-size: 0.72rem; font-weight: 700; border: 1px solid transparent; transition: all 0.2s ease; white-space: nowrap; }
+    .action-chip:hover { transform: translateY(-1px); }
+
+    .modal-backdrop { background: rgba(4, 8, 18, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+    .modal-glass { border-radius: 1.6rem; padding: 1.4rem; border: 1px solid color-mix(in srgb, var(--border) 95%, transparent); width: min(92vw, 32rem); max-height: 88vh; overflow-y: auto; }
+    .modal-field label { color: var(--text-sec); font-size: 0.82rem; font-weight: 700; margin-bottom: 0.55rem; display: block; }
+    .tag-check { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.6rem; border-radius: 0.7rem; }
+    .tag-check:hover { background: color-mix(in srgb, var(--primary) 6%, transparent); }
+
+    .text-soft { color: var(--text-sec); }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
+
+<div class="access-shell py-2 sm:py-4">
+    <section class="page-hero hero-glow p-5 sm:p-6 lg:p-8">
+        <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold tracking-[0.18em] uppercase mb-3"
+                     style="border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); color: var(--text-sec); background: color-mix(in srgb, var(--primary) 10%, transparent);">
+                    <i class="fas fa-list text-[11px]" style="color: var(--primary);"></i>
+                    Xtream Codes
+                </div>
+                <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight section-title">Categorías</h1>
+                <p class="mt-2 text-sm sm:text-base section-muted max-w-2xl">
+                    Controla las categorías que ven TiviMate / clientes IPTV. Las auto-detectadas (género/plataforma)
+                    siguen apareciendo solas, pero puedes ocultarlas, renombrarlas, reordenarlas o fusionar varias
+                    en una categoría manual. No afecta el catálogo de Stremio.
+                </p>
+            </div>
+
+            <div class="flex flex-wrap gap-3">
+                <button onclick="openCreateModal()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-plus"></i> Nueva categoría
+                </button>
+                <button onclick="loadCategories()" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold inline-flex items-center gap-2">
+                    <i class="fas fa-rotate-right"></i> Refrescar
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="flex gap-2">
+        <button id="tab-movie" onclick="switchTab('movie')" class="tab-btn glass-btn active rounded-2xl px-5 py-2.5 text-sm font-bold">Películas</button>
+        <button id="tab-series" onclick="switchTab('series')" class="tab-btn glass-btn rounded-2xl px-5 py-2.5 text-sm font-bold">Series</button>
+    </section>
+
+    <section class="section-panel p-4 sm:p-5 lg:p-6">
+        <div class="table-shell">
+            <div class="overflow-x-auto no-scrollbar">
+                <table class="access-table min-w-[900px] text-sm">
+                    <thead>
+                        <tr>
+                            <th class="px-4 py-4 text-left font-semibold">Origen</th>
+                            <th class="px-4 py-4 text-left font-semibold">Nombre</th>
+                            <th class="px-4 py-4 text-center font-semibold">Items</th>
+                            <th class="px-4 py-4 text-center font-semibold">Oculta</th>
+                            <th class="px-4 py-4 text-center font-semibold">Orden</th>
+                            <th class="px-4 py-4 text-left font-semibold">Contenido</th>
+                            <th class="px-4 py-4 text-center font-semibold">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cat-table-body">
+                        <tr><td colspan="7" class="text-center py-10 text-soft">Cargando…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- Create manual category modal -->
+<div id="cat-modal" class="fixed inset-0 hidden z-50 modal-backdrop items-center justify-center p-4">
+    <div class="modal-glass">
+        <div class="flex items-start justify-between gap-4 mb-5">
+            <div>
+                <h3 class="text-xl font-bold section-title">Nueva categoría</h3>
+                <p class="text-sm text-soft mt-1">Fusiona dos o más categorías detectadas en una sola.</p>
+            </div>
+            <button onclick="closeModal('cat-modal')" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center"><i class="fas fa-xmark"></i></button>
+        </div>
+
+        <div class="space-y-4">
+            <div class="modal-field">
+                <label>Nombre a mostrar</label>
+                <input type="text" id="cat-name" placeholder="ej. Streaming" class="glass-input w-full">
+            </div>
+            <div class="modal-field">
+                <label>Fusionar estas categorías</label>
+                <div id="cat-tag-list" class="space-y-1 max-h-60 overflow-y-auto no-scrollbar"></div>
+            </div>
+            <div class="modal-field">
+                <label>Orden de contenido</label>
+                <select id="cat-sort" class="glass-select w-full">
+                    <option value="newest">Más nuevo primero</option>
+                    <option value="title_asc">Alfabético (A-Z)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6">
+            <button onclick="closeModal('cat-modal')" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">Cancelar</button>
+            <button onclick="createCategory()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">Crear</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentMediaType = 'movie';
+    let allCategories = [];
+
+    function escHtml(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function switchTab(mediaType) {
+        currentMediaType = mediaType;
+        document.getElementById('tab-movie').classList.toggle('active', mediaType === 'movie');
+        document.getElementById('tab-series').classList.toggle('active', mediaType === 'series');
+        loadCategories();
+    }
+
+    function originBadge(c) {
+        return c.origin === 'manual'
+            ? `<span class="origin-badge origin-manual"><i class="fas fa-layer-group"></i> Manual</span>`
+            : `<span class="origin-badge origin-auto"><i class="fas fa-wand-magic-sparkles"></i> Auto</span>`;
+    }
+
+    function renderRows() {
+        const tbody = document.getElementById('cat-table-body');
+        if (!allCategories.length) { tbody.innerHTML = `<tr><td colspan="7" class="text-center py-10 text-soft">Sin categorías todavía.</td></tr>`; return; }
+        tbody.innerHTML = allCategories.map(c => `
+            <tr data-key="${escHtml(c.key)}">
+                <td class="px-4 py-3">${originBadge(c)}</td>
+                <td class="px-4 py-3">
+                    <input type="text" value="${escHtml(c.display_name)}" class="glass-input w-full cat-name-input"
+                           onblur="saveField('${escHtml(c.key)}', 'display_name', this.value)">
+                </td>
+                <td class="px-4 py-3 text-center">${c.count}</td>
+                <td class="px-4 py-3 text-center">
+                    <input type="checkbox" ${c.hidden ? 'checked' : ''} class="w-4 h-4"
+                           onchange="saveField('${escHtml(c.key)}', 'hidden', this.checked)">
+                </td>
+                <td class="px-4 py-3 text-center">
+                    <input type="number" value="${c.order ?? ''}" placeholder="—" class="glass-input w-20 text-center"
+                           onblur="saveField('${escHtml(c.key)}', 'order', this.value === '' ? null : parseInt(this.value, 10))">
+                </td>
+                <td class="px-4 py-3">
+                    <select class="glass-select" onchange="saveField('${escHtml(c.key)}', 'sort', this.value)">
+                        <option value="newest" ${c.sort === 'newest' ? 'selected' : ''}>Más nuevo</option>
+                        <option value="title_asc" ${c.sort === 'title_asc' ? 'selected' : ''}>A-Z</option>
+                    </select>
+                </td>
+                <td class="px-4 py-3 text-center">
+                    <button onclick="deleteCategory('${escHtml(c.key)}', ${c.origin === 'manual'})" class="action-chip glass-btn-danger">
+                        ${c.origin === 'manual' ? 'Eliminar' : 'Restablecer'}
+                    </button>
+                </td>
+            </tr>`).join('');
+    }
+
+    async function loadCategories() {
+        document.getElementById('cat-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-10 text-soft">Cargando…</td></tr>`;
+        try {
+            const resp = await fetch('/api/xtream-categories?media_type=' + currentMediaType);
+            const data = await resp.json();
+            allCategories = data.categories || [];
+            renderRows();
+        } catch (err) {
+            document.getElementById('cat-table-body').innerHTML = `<tr><td colspan="7" class="text-center py-10 text-red-300">Error: ${err.message}</td></tr>`;
+            showToast('No se pudieron cargar las categorías.', 'error', 'Error');
+        }
+    }
+
+    async function saveField(key, field, value) {
+        try {
+            const resp = await fetch('/api/xtream-categories/' + encodeURIComponent(key) + '?media_type=' + currentMediaType, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ [field]: value }),
+            });
+            if (resp.ok) { showToast('Guardado.', 'success', 'Guardado'); loadCategories(); }
+            else { const d = await resp.json(); showToast(d.detail || 'Error al guardar.', 'error', 'Error'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Error de red'); }
+    }
+
+    async function deleteCategory(key, isManual) {
+        const msg = isManual ? `¿Eliminar esta categoría manual?` : `¿Restablecer esta categoría a su estado automático?`;
+        if (!confirm(msg)) return;
+        try {
+            const resp = await fetch('/api/xtream-categories/' + encodeURIComponent(key) + '?media_type=' + currentMediaType, { method: 'DELETE' });
+            if (resp.ok) { showToast('Hecho.', 'success', 'Actualizado'); loadCategories(); }
+            else { const d = await resp.json(); showToast(d.detail || 'Error.', 'error', 'Error'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Error de red'); }
+    }
+
+    function openModal(id) {
+        const m = document.getElementById(id);
+        m.classList.remove('hidden'); m.classList.add('flex');
+        document.body.classList.add('overflow-hidden');
+    }
+    function closeModal(id) {
+        const m = document.getElementById(id);
+        m.classList.add('hidden'); m.classList.remove('flex');
+        document.body.classList.remove('overflow-hidden');
+    }
+
+    function openCreateModal() {
+        document.getElementById('cat-name').value = '';
+        document.getElementById('cat-sort').value = 'newest';
+        const list = document.getElementById('cat-tag-list');
+        const candidates = allCategories.filter(c => c.raw_tag || c.origin === 'auto');
+        list.innerHTML = candidates.map(c => `
+            <label class="tag-check">
+                <input type="checkbox" value="${escHtml(c.raw_tag || c.key)}" class="w-4 h-4 cat-tag-check">
+                <span>${escHtml(c.display_name)} <span class="text-soft">(${c.count})</span></span>
+            </label>`).join('') || `<div class="text-soft text-sm px-2">No hay categorías detectadas todavía.</div>`;
+        openModal('cat-modal');
+    }
+
+    async function createCategory() {
+        const displayName = document.getElementById('cat-name').value.trim();
+        const sort = document.getElementById('cat-sort').value;
+        const tags = Array.from(document.querySelectorAll('.cat-tag-check:checked')).map(el => el.value);
+
+        if (!displayName) { showToast('El nombre es obligatorio.', 'error', 'Validación'); return; }
+        if (tags.length < 2) { showToast('Selecciona al menos 2 categorías para fusionar.', 'error', 'Validación'); return; }
+
+        try {
+            const resp = await fetch('/api/xtream-categories', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ media_type: currentMediaType, display_name: displayName, tags, sort }),
+            });
+            if (resp.ok) { showToast('Categoría creada.', 'success', 'Creada'); closeModal('cat-modal'); loadCategories(); }
+            else { const d = await resp.json(); showToast(d.detail || 'Error al crear.', 'error', 'Error'); }
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Error de red'); }
+    }
+
+    document.getElementById('cat-modal').addEventListener('click', function (e) { if (e.target === this) closeModal('cat-modal'); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal('cat-modal'); });
+
+    loadCategories();
+</script>
+{% endblock %}

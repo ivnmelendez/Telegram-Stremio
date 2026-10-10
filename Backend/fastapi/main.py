@@ -121,6 +121,10 @@ from Backend.fastapi.routes.api_routes import (
     update_token_limits_api,
     list_family_users_api,
     update_family_user_api,
+    list_xtream_categories_api,
+    create_xtream_category_api,
+    update_xtream_category_api,
+    delete_xtream_category_api,
 )
 from Backend.fastapi.routes.stream_routes import decay_client_failures
 from Backend.fastapi.routes.stream_routes import router as stream_router
@@ -132,6 +136,7 @@ from Backend.fastapi.routes.template_routes import (
     admin_access_page,
     admin_dashboard_page,
     admin_family_users_page,
+    admin_xtream_categories_page,
     admin_requests_page,
     admin_subscriptions_page,
     public_request_page,
@@ -463,6 +468,26 @@ async def admin_access(request: Request, _: bool = Depends(require_auth)):
 @app.get("/admin/family-users", response_class=HTMLResponse)
 async def admin_family_users(request: Request, _: bool = Depends(require_auth)):
     return await admin_family_users_page(request, _)
+
+@app.get("/admin/xtream-categories", response_class=HTMLResponse)
+async def admin_xtream_categories(request: Request, _: bool = Depends(require_auth)):
+    return await admin_xtream_categories_page(request, _)
+
+@app.get("/api/xtream-categories")
+async def get_xtream_categories(media_type: str = "movie", _: bool = Depends(require_auth)):
+    return await list_xtream_categories_api(media_type)
+
+@app.post("/api/xtream-categories")
+async def post_xtream_category(payload: dict, _: bool = Depends(require_auth)):
+    return await create_xtream_category_api(payload)
+
+@app.put("/api/xtream-categories/{key}")
+async def put_xtream_category(key: str, payload: dict, media_type: str = "movie", _: bool = Depends(require_auth)):
+    return await update_xtream_category_api(key, media_type, payload)
+
+@app.delete("/api/xtream-categories/{key}")
+async def delete_xtream_category(key: str, media_type: str = "movie", _: bool = Depends(require_auth)):
+    return await delete_xtream_category_api(key, media_type)
 
 @app.get("/api/admin/access/tokens")
 async def get_access_tokens(_: bool = Depends(require_auth)):

@@ -15,10 +15,13 @@ from pyrogram.enums import ChatMemberStatus, ChatMembersFilter
 from pyrogram.errors import FloodWait
 from pyrogram.types import ChatPrivileges
 
+import re
+
 import Backend
 from Backend import StartTime, __version__, db
 from Backend.fastapi.routes.stream_routes import _streamer_by_client
 from Backend.fastapi.routes.stremio_routes import invalidate_membership_cache
+from Backend.fastapi.routes import xtream_routes
 from Backend.helper.analytics import get_activity_overview
 from Backend.helper.auto_catalog import (
     get_auto_catalog_settings,
@@ -3005,3 +3008,111 @@ async def family_login_api(payload: dict) -> dict:
         "manifest_url": _family_manifest_url(api_token),
         "xtream": doc.get("xtream"),
     }
+
+
+#-----
+#----- Xtream category overrides (admin control over the auto-computed
+#----- genre/platform categories exposed by the Xtream Codes API)
+#-----
+def _slugify_category_key(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or "categoria"
+
+
+async def list_xtream_categories_api(media_type: str) -> dict:
+    if media_type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
+
+    overrides = {d["key"]: d for d in await db.list_xtream_categories(media_type)}
+    counts = await xtream_routes.tag_counts(media_type)
+
+    if media_type == "movie":
+        raw_tags = sorted(await xtream_routes._movie_categories_set())
+    else:
+        genres, networks = await xtream_routes._series_categories_set()
+        raw_tags = xtream_routes._ordered_platforms(networks) + sorted(genres)
+
+    def _row(key: str, raw: str | None, override: dict) -> dict:
+        tags = override.get("tags") or []
+        count = sum(counts.get(t, 0) for t in tags) if tags else counts.get(raw or key, 0)
+        return {
+            "key": key,
+            "media_type": media_type,
+            "origin": override.get("origin", "auto"),
+            "raw_tag": raw,
+            "display_name": override.get("display_name") or xtream_routes._display_name(raw or key),
+            "hidden": override.get("hidden", False),
+            "order": override.get("order"),
+            "sort": override.get("sort", "newest"),
+            "tags": tags,
+            "count": count,
+        }
+
+    seen: set = set()
+    rows: list = []
+    for raw in raw_tags:
+        key = xtream_routes._effective_tag(overrides, raw) or raw
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(_row(key, raw if key == raw else None, overrides.get(key, {})))
+
+    for key, override in overrides.items():
+        if override.get("origin") != "manual" or key in seen:
+            continue
+        rows.append(_row(key, None, override))
+
+    rows.sort(key=lambda r: (r["order"] is None, r["order"] or 0, r["display_name"]))
+    return {"categories": rows}
+
+
+async def create_xtream_category_api(payload: dict) -> dict:
+    media_type = payload.get("media_type")
+    if media_type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
+    display_name = (payload.get("display_name") or "").strip()
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name is required")
+    tags = [t for t in (payload.get("tags") or []) if t]
+    if not tags:
+        raise HTTPException(status_code=400, detail="at least one tag to merge is required")
+
+    existing_keys = {d["key"] for d in await db.list_xtream_categories(media_type)}
+    base_key = _slugify_category_key(display_name)
+    key, n = base_key, 2
+    while key in existing_keys:
+        key = f"{base_key}-{n}"
+        n += 1
+
+    return await db.upsert_xtream_category(
+        key, media_type,
+        origin="manual",
+        display_name=display_name,
+        tags=tags,
+        sort=payload.get("sort") or "newest",
+        order=payload.get("order"),
+    )
+
+
+async def update_xtream_category_api(key: str, media_type: str, payload: dict) -> dict:
+    if media_type not in ("movie", "series"):
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
+    fields: dict = {}
+    if "display_name" in payload:
+        fields["display_name"] = (payload.get("display_name") or "").strip() or None
+    if "hidden" in payload:
+        fields["hidden"] = bool(payload["hidden"])
+    if "order" in payload:
+        fields["order"] = payload["order"]
+    if "sort" in payload:
+        fields["sort"] = payload.get("sort") or "newest"
+    if "tags" in payload:
+        fields["tags"] = [t for t in (payload.get("tags") or []) if t]
+    return await db.upsert_xtream_category(key, media_type, **fields)
+
+
+async def delete_xtream_category_api(key: str, media_type: str) -> dict:
+    ok = await db.delete_xtream_category(key, media_type)
+    if not ok:
+        raise HTTPException(status_code=404, detail="category not found")
+    return {"status": "success", "message": "Category override removed."}

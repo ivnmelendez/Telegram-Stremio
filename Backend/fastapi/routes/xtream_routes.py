@@ -185,6 +185,23 @@ async def _series_categories_set() -> tuple:
     return genre_tags, platform_tags
 
 
+#----- Live item count per raw tag (pre-merge) - used by the admin categories
+#----- panel so the list shows how many titles actually fall in each bucket.
+async def tag_counts(media_type: str) -> dict:
+    counts: dict = {}
+    if media_type == "movie":
+        for m in await _all_movies():
+            tag = _primary_movie_tag(m.get("genres") or [])
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    else:
+        for s in await _all_tv_shows():
+            tag, _kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    return counts
+
+
 #----- Visual formatting seen on a real Xtream provider's series categories —
 #----- colored square emoji + "+" instead of "Plus". Display-only: category_id
 #----- is always computed from the raw name, so this is safe to extend anytime.
@@ -212,8 +229,80 @@ def _display_name(name: str) -> str:
     return _PLATFORM_DISPLAY.get(name) or _GENRE_DISPLAY.get(name) or name
 
 
+#----- Admin overrides for the categories above (hide/rename/reorder/merge/sort),
+#----- persisted in tracking.xtream_categories via the /admin/xtream-categories
+#----- panel. Cached with the same TTL as the catalog - repeat player_api calls
+#----- in one TiviMate menu open don't each hit Mongo.
+async def _category_overrides(media_type: str) -> dict:
+    async def _load():
+        docs = await db.list_xtream_categories(media_type)
+        return {d["key"]: d for d in docs}
+    return await _cached(f"cat_overrides_{media_type}", _load)
+
+
+#----- If `raw_tag` was folded into a manual category, resolve to that
+#----- category's key instead - so the item's category_id matches the merged
+#----- category, not its original genre/platform.
+def _effective_tag(overrides: dict, raw_tag: str | None) -> str | None:
+    if not raw_tag:
+        return None
+    for key, override in overrides.items():
+        if override.get("origin") == "manual" and raw_tag in (override.get("tags") or []):
+            return key
+    return raw_tag
+
+
+def _sort_mode_for(overrides: dict, prefix: str, category_id: str | None) -> str:
+    if not category_id:
+        return "newest"
+    for key, override in overrides.items():
+        if _category_id(prefix, key) == category_id:
+            return override.get("sort") or "newest"
+    return "newest"
+
+
+#----- Build the category menu: dedupe raw genre/platform tags through manual
+#----- merges, apply hidden/display_name/order, then append manual categories
+#----- with zero live tags today (admin created them on purpose).
+def _build_category_list(overrides: dict, prefix: str, raw_tags: list) -> list:
+    seen_keys: set = set()
+    entries = []
+    for raw in raw_tags:
+        key = _effective_tag(overrides, raw) or raw
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        override = overrides.get(key)
+        if override and override.get("hidden"):
+            continue
+        label = (override or {}).get("display_name") or _display_name(key if key != raw else raw)
+        entries.append({
+            "category_id": _category_id(prefix, key),
+            "category_name": label,
+            "parent_id": 0,
+            "_order": (override or {}).get("order"),
+        })
+    for key, override in overrides.items():
+        if override.get("origin") != "manual" or key in seen_keys or override.get("hidden"):
+            continue
+        entries.append({
+            "category_id": _category_id(prefix, key),
+            "category_name": override.get("display_name") or key,
+            "parent_id": 0,
+            "_order": override.get("order"),
+        })
+    ordered = sorted((e for e in entries if e["_order"] is not None), key=lambda e: e["_order"])
+    unordered = [e for e in entries if e["_order"] is None]
+    for e in ordered:
+        e.pop("_order", None)
+    for e in unordered:
+        e.pop("_order", None)
+    return ordered + unordered
+
+
 async def _list_vod_streams(category_id: str = None) -> list:
     movies = [m for m in await _all_movies() if m.get("imdb_id")]
+    overrides = await _category_overrides("movie")
     #----- One round-trip for every stream id in this response, instead of one
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
@@ -221,7 +310,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
     out = []
     for m in movies:
         imdb_id = m["imdb_id"]
-        primary = _primary_movie_tag(m.get("genres") or [])
+        primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
         primary_id = _category_id("movie_genre", primary) if primary else None
         cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if category_id and category_id not in cat_ids:
@@ -248,17 +337,21 @@ async def _list_vod_streams(category_id: str = None) -> list:
             "custom_sid": "",
             "direct_source": "",
         })
+    if category_id and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
+        out.sort(key=lambda it: it["name"].lower())
     return out
 
 
 async def _list_series(category_id: str = None) -> list:
     shows = [s for s in await _all_tv_shows() if s.get("imdb_id")]
+    overrides = await _category_overrides("series")
     id_map = await db.upsert_xtream_stream_ids_bulk([(s["imdb_id"], "tv", None, None) for s in shows])
 
     out = []
     for s in shows:
         imdb_id = s["imdb_id"]
         primary, _kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
+        primary = _effective_tag(overrides, primary)
         primary_id = _category_id("series_tag", primary) if primary else None
         cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if category_id and category_id not in cat_ids:
@@ -280,6 +373,8 @@ async def _list_series(category_id: str = None) -> list:
             "rating": str(s.get("rating") or ""),
             "rating_5based": round((s.get("rating") or 0) / 2, 1),
         })
+    if category_id and _sort_mode_for(overrides, "series_tag", category_id) == "title_asc":
+        out.sort(key=lambda it: it["name"].lower())
     return out
 
 
@@ -415,24 +510,17 @@ async def player_api(request: Request):
         return {"user_info": _user_info(token_data, username), "server_info": _server_info()}
 
     if action == "get_vod_categories":
+        overrides = await _category_overrides("movie")
         genres = await _movie_categories_set()
         cats = [{"category_id": ALL_MOVIES_CATEGORY_ID, "category_name": ALL_MOVIES_CATEGORY_NAME, "parent_id": 0}]
-        cats += [
-            {"category_id": _category_id("movie_genre", g), "category_name": _display_name(g), "parent_id": 0}
-            for g in sorted(genres)
-        ]
+        cats += _build_category_list(overrides, "movie_genre", sorted(genres))
         return cats
     if action == "get_series_categories":
+        overrides = await _category_overrides("series")
         genres, networks = await _series_categories_set()
+        raw_tags = _ordered_platforms(networks) + sorted(genres)
         cats = [{"category_id": ALL_SERIES_CATEGORY_ID, "category_name": ALL_SERIES_CATEGORY_NAME, "parent_id": 0}]
-        cats += [
-            {"category_id": _category_id("series_tag", p), "category_name": _display_name(p), "parent_id": 0}
-            for p in _ordered_platforms(networks)
-        ]
-        cats += [
-            {"category_id": _category_id("series_tag", g), "category_name": _display_name(g), "parent_id": 0}
-            for g in sorted(genres)
-        ]
+        cats += _build_category_list(overrides, "series_tag", raw_tags)
         return cats
     if action in ("get_live_categories", "get_live_streams"):
         return []

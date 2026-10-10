@@ -210,6 +210,13 @@ async def admin_family_users_page(request: Request, _: bool = Depends(require_au
     return templates.TemplateResponse("family_users.html", ctx)
 
 
+#----- Xtream category overrides shell (hide/rename/reorder/merge genre+platform)
+async def admin_xtream_categories_page(request: Request, _: bool = Depends(require_auth)):
+    ctx = _base_context(request)
+    ctx["current_user"] = get_current_user(request)
+    return templates.TemplateResponse("xtream_categories.html", ctx)
+
+
 #----- Content requests shell (admin)
 async def admin_requests_page(request: Request, _: bool = Depends(require_auth)):
     ctx = _base_context(request)

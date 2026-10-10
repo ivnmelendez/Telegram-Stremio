@@ -84,6 +84,9 @@ class Database:
                     [("items.tmdb_id", ASCENDING), ("items.media_type", ASCENDING)]
                 )
                 await tracking["family_users"].create_index([("username", ASCENDING)], unique=True)
+                await tracking["xtream_categories"].create_index(
+                    [("key", ASCENDING), ("media_type", ASCENDING)], unique=True
+                )
                 await self._ensure_subtitle_indexes(tracking)
             except Exception as e:
                 LOGGER.error(f"Failed creating tracking indexes: {e}")
@@ -1353,6 +1356,7 @@ class Database:
                 is_anime=metadata_info.get('is_anime', False),
                 original_language=metadata_info.get('original_language'),
                 origin_country=metadata_info.get('origin_country', []) or [],
+                networks=metadata_info.get('networks') or [],
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
                     episodes=[Episode(
@@ -2467,6 +2471,43 @@ class Database:
 
     async def delete_family_user(self, username: str) -> bool:
         result = await self.dbs["tracking"]["family_users"].delete_one({"username": username})
+        return result.deleted_count > 0
+
+    #-----
+    #----- Xtream category overrides (admin control over the auto-computed
+    #----- genre/platform categories exposed by the Xtream Codes API)
+    #-----
+    async def list_xtream_categories(self, media_type: Optional[str] = None) -> List[dict]:
+        query = {"media_type": media_type} if media_type else {}
+        cursor = self.dbs["tracking"]["xtream_categories"].find(query)
+        docs = await cursor.to_list(None)
+        return [convert_objectid_to_str(doc) for doc in docs]
+
+    async def upsert_xtream_category(self, key: str, media_type: str, **fields) -> dict:
+        now = datetime.utcnow()
+        origin = fields.pop("origin", None)
+        fields = {k: v for k, v in fields.items() if v is not None}
+        update = {
+            "$set": {**fields, "updated_at": now},
+            "$setOnInsert": {
+                "key": key,
+                "media_type": media_type,
+                "origin": origin or "auto",
+                "created_at": now,
+            },
+        }
+        await self.dbs["tracking"]["xtream_categories"].update_one(
+            {"key": key, "media_type": media_type}, update, upsert=True
+        )
+        doc = await self.dbs["tracking"]["xtream_categories"].find_one(
+            {"key": key, "media_type": media_type}
+        )
+        return convert_objectid_to_str(doc)
+
+    async def delete_xtream_category(self, key: str, media_type: str) -> bool:
+        result = await self.dbs["tracking"]["xtream_categories"].delete_one(
+            {"key": key, "media_type": media_type}
+        )
         return result.deleted_count > 0
 
     #-----
