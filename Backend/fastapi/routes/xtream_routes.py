@@ -120,24 +120,11 @@ ALL_SERIES_CATEGORY_ID = "2"
 ALL_MOVIES_CATEGORY_NAME = "Todas las películas"
 ALL_SERIES_CATEGORY_NAME = "Todas las series"
 
-#----- "Estrenos <year>" - a movie's year, not genre/platform - so it's a
-#----- second category a title can belong to alongside its genre, not a
-#----- replacement. Fixed id (year only changes the label) so it never
-#----- collides with crc32-based genre ids.
-ESTRENOS_CATEGORY_ID = "3"
-
 #----- "En tendencia" - TMDB's weekly trending ranking, global and unrelated
-#----- to genre/platform/upload date. Same media_type-scoped id reuse pattern
-#----- as ESTRENOS_CATEGORY_ID: movie and series category spaces never mix.
+#----- to platform/upload date. Fixed id so it never collides with crc32-based
+#----- platform ids. Movie and series category spaces never mix, so reusing
+#----- the same id string for both is safe.
 TRENDING_CATEGORY_ID = "4"
-
-
-def _estreno_year() -> int:
-    return datetime.now().year
-
-
-def _is_estreno(movie: dict) -> bool:
-    return movie.get("release_year") == _estreno_year()
 
 
 async def _all_movies() -> list:
@@ -162,63 +149,47 @@ def _ordered_platforms(networks: set) -> list:
     return ordered + extra
 
 
-#----- One title -> one category, same as a real provider (no duplicate stream
-#----- entries per secondary tag). Movie's primary is its first genre.
-def _primary_movie_tag(genres: list) -> str | None:
-    return genres[0] if genres else None
+#----- One title -> one platform, same rule for movies and series: highest-
+#----- priority platform in _PLATFORM_DISPLAY order wins, never more than one.
+#----- Movies with no flatrate/buy/rent data anywhere just have no platform -
+#----- still browsable via the native app tab, just not under a category.
+def _primary_platform_tag(networks: list) -> str | None:
+    if not networks:
+        return None
+    ordered = _ordered_platforms(set(networks))
+    return ordered[0] if ordered else None
 
 
-#----- Series: platform wins over genre when both exist (matches category order
-#----- All -> platforms -> genres). Returns (tag, "platform"|"genre") or (None, None).
-def _primary_series_tag(genres: list, networks: list) -> tuple:
-    if networks:
-        ordered = _ordered_platforms(set(networks))
-        if ordered:
-            return ordered[0], "platform"
-    if genres:
-        return genres[0], "genre"
-    return None, None
-
-
-#----- Distinct primary genre across the movie catalog (only tags actually
+#----- Distinct primary platform across the movie catalog (only tags actually
 #----- assignable to a title, so the menu never shows an empty category).
 async def _movie_categories_set() -> set:
     tags = set()
     for m in await _all_movies():
-        tag = _primary_movie_tag(m.get("genres") or [])
+        tag = _primary_platform_tag(m.get("networks") or [])
         if tag:
             tags.add(tag)
     return tags
 
 
-#----- Distinct primary genres/platforms across the series catalog, split so the
-#----- menu can order platforms before genres.
-async def _series_categories_set() -> tuple:
-    genre_tags = set()
-    platform_tags = set()
+#----- Distinct primary platform across the series catalog.
+async def _series_categories_set() -> set:
+    tags = set()
     for s in await _all_tv_shows():
-        tag, kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
-        if kind == "platform":
-            platform_tags.add(tag)
-        elif kind == "genre":
-            genre_tags.add(tag)
-    return genre_tags, platform_tags
+        tag = _primary_platform_tag(s.get("networks") or [])
+        if tag:
+            tags.add(tag)
+    return tags
 
 
 #----- Live item count per raw tag (pre-merge) - used by the admin categories
 #----- panel so the list shows how many titles actually fall in each bucket.
 async def tag_counts(media_type: str) -> dict:
     counts: dict = {}
-    if media_type == "movie":
-        for m in await _all_movies():
-            tag = _primary_movie_tag(m.get("genres") or [])
-            if tag:
-                counts[tag] = counts.get(tag, 0) + 1
-    else:
-        for s in await _all_tv_shows():
-            tag, _kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
-            if tag:
-                counts[tag] = counts.get(tag, 0) + 1
+    items = await _all_movies() if media_type == "movie" else await _all_tv_shows()
+    for item in items:
+        tag = _primary_platform_tag(item.get("networks") or [])
+        if tag:
+            counts[tag] = counts.get(tag, 0) + 1
     return counts
 
 
@@ -328,20 +299,6 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
 
-    #----- A movie that's both an Estreno AND Trending would otherwise repeat
-    #----- the SAME stream_id in 3 different category rows (genre + Estrenos +
-    #----- Tendencia) in the unfiltered dump. The reference provider we
-    #----- verified against only ever reuses an id across 2 rows (it doesn't
-    #----- even have a Trending category) - untested territory for a 3rd reuse,
-    #----- so give the Tendencia placement its own id whenever this overlap
-    #----- happens, keeping every id to at most 2 occurrences.
-    overlap_movies = [m for m in movies if _is_estreno(m) and m.get("tmdb_id") in trending]
-    overlap_id_map = {}
-    if overlap_movies:
-        overlap_id_map = await db.upsert_xtream_stream_ids_bulk(
-            [(m["imdb_id"], "movie", None, "trending") for m in overlap_movies]
-        )
-
     def _row(m: dict, cat: str, sid: int) -> dict:
         return {
             "num": sid,
@@ -360,17 +317,13 @@ async def _list_vod_streams(category_id: str = None) -> list:
         }
 
     out = []
-    estreno_rows = []  #----- collected separately, sorted by "added", appended at the end
     trending_rows = []
     for m in movies:
         imdb_id = m["imdb_id"]
-        primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
-        primary_id = _category_id("movie_genre", primary) if primary else None
-        is_estreno = _is_estreno(m)
+        primary = _effective_tag(overrides, _primary_platform_tag(m.get("networks") or []))
+        primary_id = _category_id("movie_platform", primary) if primary else None
         is_trending = m.get("tmdb_id") in trending
         cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
-        if is_estreno:
-            cat_ids.append(ESTRENOS_CATEGORY_ID)
         if is_trending:
             cat_ids.append(TRENDING_CATEGORY_ID)
         if category_id and category_id not in cat_ids:
@@ -379,42 +332,30 @@ async def _list_vod_streams(category_id: str = None) -> list:
         #----- Same stream_id regardless of which category row this is - matches
         #----- how real Xtream providers do it (verified against a live
         #----- reference provider: same stream_id repeated across both category
-        #----- rows for the same title).
+        #----- rows for the same title). At most 2 rows per title now that
+        #----- Estrenos is gone, so no id-collision risk.
         sid = id_map[f"{imdb_id}:None:None"]
-        trending_sid = overlap_id_map[f"{imdb_id}:None:trending"] if (is_estreno and is_trending) else sid
-        if category_id == ESTRENOS_CATEGORY_ID:
-            estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
-            continue
         if category_id == TRENDING_CATEGORY_ID:
-            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, trending_sid)))
+            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, sid)))
             continue
         if category_id:
             out.append(_row(m, category_id, sid))
             continue
 
-        #----- Unfiltered dump: one row for its primary category (same as
-        #----- always), PLUS a second row per extra category (Estrenos,
-        #----- Tendencia) it qualifies for - this is the only way a client
-        #----- that groups this single response client-side ever discovers
-        #----- those entries at all.
+        #----- Unfiltered dump: one row for its primary platform (same as
+        #----- always), PLUS a second row if it's Trending - this is the only
+        #----- way a client that groups this single response client-side ever
+        #----- discovers the Tendencia entries at all.
         out.append(_row(m, primary_id or ALL_MOVIES_CATEGORY_ID, sid))
-        if is_estreno:
-            estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
         if is_trending:
-            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, trending_sid)))
+            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, sid)))
 
-    #----- Estrenos: recien agregado primero (added = updated_on, ya viene en
-    #----- la fila) - el cliente nunca re-pide con category_id (confirmado por
-    #----- logs), asi que el orden tiene que venir correcto desde el dump sin
-    #----- filtrar que realmente usa.
-    estreno_rows.sort(key=lambda it: it["added"], reverse=True)
-    out += estreno_rows
     #----- Tendencia: mismo orden exacto que manda TMDB (mas "trending" primero).
     trending_rank = {tid: i for i, tid in enumerate(trending)}
     trending_rows.sort(key=lambda pair: trending_rank.get(pair[0], 9999))
     out += [row for _tid, row in trending_rows]
 
-    if category_id and category_id not in (ESTRENOS_CATEGORY_ID, TRENDING_CATEGORY_ID) and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
+    if category_id and category_id != TRENDING_CATEGORY_ID and _sort_mode_for(overrides, "movie_platform", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
     return out
 
@@ -444,15 +385,8 @@ async def _list_series(category_id: str = None) -> list:
     trending_rows = []
     for s in shows:
         imdb_id = s["imdb_id"]
-        primary, kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
-        effective = _effective_tag(overrides, primary)
-        #----- Genero crudo ya no se lista como categoria propia (solo
-        #----- plataforma) - si no fue fusionado a mano en una categoria
-        #----- manual, cae al catch-all en vez de un category_id huerfano
-        #----- que el cliente no reconoce ("Unknown").
-        if effective == primary and kind != "platform":
-            effective = None
-        primary_id = _category_id("series_tag", effective) if effective else None
+        primary = _effective_tag(overrides, _primary_platform_tag(s.get("networks") or []))
+        primary_id = _category_id("series_tag", primary) if primary else None
         is_trending = s.get("tmdb_id") in trending
         cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if is_trending:
@@ -615,40 +549,30 @@ async def player_api(request: Request):
         return {"user_info": _user_info(token_data, username), "server_info": _server_info()}
 
     if action == "get_vod_categories":
-        #----- Sin categoria sintetica "Todas las peliculas" - ningun proveedor
-        #----- real la lista, y clientes que agrupan el dump completo por
-        #----- category_id (en vez de volver a pedir al server) terminaban
-        #----- mostrando solo el titulo suelto sin plataforma/genero bajo esa
-        #----- fila. La pestana nativa "Movies" del cliente ya cubre "todas".
+        #----- Solo plataforma de streaming (igual que series), sin categoria
+        #----- sintetica "Todas las peliculas" - ningun proveedor real la lista,
+        #----- y clientes que agrupan el dump completo por category_id (en vez
+        #----- de volver a pedir al server) terminaban mostrando solo el titulo
+        #----- suelto bajo esa fila. La pestana nativa "Movies" ya cubre "todas".
         overrides = await _category_overrides("movie")
-        genres = await _movie_categories_set()
+        platforms = await _movie_categories_set()
         all_movies = await _all_movies()
         cats = []
-        if any(_is_estreno(m) for m in all_movies):
-            cats.append({
-                "category_id": ESTRENOS_CATEGORY_ID,
-                "category_name": f"Estrenos {_estreno_year()}",
-                "parent_id": 0,
-            })
         trending = await tmdb_provider.trending_ids("movie")
         if trending and any(m.get("tmdb_id") in trending for m in all_movies):
             cats.append({"category_id": TRENDING_CATEGORY_ID, "category_name": "En tendencia", "parent_id": 0})
-        cats += _build_category_list(overrides, "movie_genre", sorted(genres))
+        cats += _build_category_list(overrides, "movie_platform", _ordered_platforms(platforms))
         return cats
     if action == "get_series_categories":
-        #----- Solo plataformas de streaming, nunca genero (igual que arriba),
-        #----- y sin categoria sintetica "Todas las series" por la misma razon
-        #----- que get_vod_categories. Series sin plataforma detectada no
-        #----- aparecen en ninguna fila de categoria, pero siguen existiendo
-        #----- en la pestana nativa "Series" del cliente.
+        #----- Solo plataforma, sin categoria sintetica "Todas las series" por
+        #----- la misma razon que get_vod_categories.
         overrides = await _category_overrides("series")
-        _genres, networks = await _series_categories_set()
-        raw_tags = _ordered_platforms(networks)
+        platforms = await _series_categories_set()
         cats = []
         trending = await tmdb_provider.trending_ids("tv")
         if trending and any(s.get("tmdb_id") in trending for s in await _all_tv_shows()):
             cats.append({"category_id": TRENDING_CATEGORY_ID, "category_name": "En tendencia", "parent_id": 0})
-        cats += _build_category_list(overrides, "series_tag", raw_tags)
+        cats += _build_category_list(overrides, "series_tag", _ordered_platforms(platforms))
         return cats
     if action in ("get_live_categories", "get_live_streams"):
         return []

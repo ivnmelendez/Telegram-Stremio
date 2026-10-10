@@ -15,6 +15,21 @@ from Backend.logger import LOGGER
 
 # ── Movies: TMDB > Cinemeta ──────────────────────────────────────────────────
 
+#----- Cinemeta has no "where to watch" data either - same reasoning as
+#----- _enrich_series_networks, for the rare movie paths that don't already
+#----- go through tmdb.build_movie_payload (which sets networks itself).
+async def _enrich_movie_networks(result: Optional[dict]) -> Optional[dict]:
+    if not result or result.get("networks") or not result.get("tmdb_id"):
+        return result
+    try:
+        movie = await tmdb.details("movie", result["tmdb_id"])
+        if movie:
+            result["networks"] = list(getattr(movie, "networks", None) or [])
+    except Exception as e:
+        LOGGER.debug(f"[MOVIE] networks enrichment failed for tmdb_id={result.get('tmdb_id')}: {e}")
+    return result
+
+
 async def resolve_movie(
     title: str,
     encoded_string,
@@ -35,7 +50,9 @@ async def resolve_movie(
         try:
             detail = await cinemeta.cached_detail(imdb_id, "movie")
             if detail:
-                return cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
+                return await _enrich_movie_networks(
+                    cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
+                )
         except Exception as e:
             LOGGER.warning(f"Cinemeta explicit movie fetch failed [{imdb_id}]: {e}")
 
@@ -69,7 +86,9 @@ async def resolve_movie(
                         movie = await tmdb.details("movie", es_item.id)
                         if movie:
                             return tmdb.build_movie_payload(movie, quality, encoded_string)
-                    return cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
+                    return await _enrich_movie_networks(
+                        cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
+                    )
                 LOGGER.info(
                     f"[MOVIE] Cinemeta title mismatch for '{title}': "
                     f"got '{detail.get('title')}' (sim={sim:.2f})"

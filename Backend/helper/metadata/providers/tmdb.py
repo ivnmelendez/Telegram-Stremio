@@ -246,6 +246,31 @@ async def safe_search(title: str, type_: str, year: Optional[int] = None):
     return await cached_call(TMDB_SEARCH_CACHE, cache_key, "tmdb_search", _produce)
 
 
+#----- Streaming platform for a title: subscription (flatrate) first, falling
+#----- back to buy/rent (ej. peliculas nuevas que solo estan en renta/compra,
+#----- no en ningun servicio de suscripcion todavia). MX first, US fallback
+#----- when TMDB has no MX licensing data at all (ej. producciones no-US).
+async def _fetch_networks(target, item_id) -> list:
+    try:
+        wp = await target.watch_providers()
+        results = wp.results or {} if wp else {}
+        region = results.get("MX") or results.get("US")
+        if not region:
+            return []
+        for bucket in (region.flatrate, getattr(region, "buy", None), getattr(region, "rent", None)):
+            seen: list[str] = []
+            for p in (bucket or []):
+                norm = _normalize_provider_name(p.provider_name)
+                if norm and norm not in seen:
+                    seen.append(norm)
+            if seen:
+                return seen
+        return []
+    except Exception as e:
+        LOGGER.warning(f"TMDb watch_providers fetch failed for id={item_id}: {e}")
+        return []
+
+
 async def details(media_type: str, item_id):
     cache_key = (media_type, item_id)
 
@@ -257,27 +282,10 @@ async def details(media_type: str, item_id):
                 det = await target.details(append_to_response="external_ids,credits")
                 det.images = await target.images()
                 #----- det.networks (canal original, ej. "Comedy Central") no sirve para
-                #----- saber donde ver la serie HOY. Lo pisamos con el proveedor de
-                #----- streaming real para Mexico via watch/providers (ej. "Paramount Plus").
-                if media_type == "tv":
-                    try:
-                        wp = await target.watch_providers()
-                        results = wp.results or {} if wp else {}
-                        #----- MX a veces no tiene datos (titulos no-US sin
-                        #----- licencia registrada en TMDB para Mexico, ej.
-                        #----- producciones argentinas) - USA como fallback
-                        #----- antes de dejar la serie sin plataforma.
-                        region = results.get("MX") or results.get("US")
-                        flatrate = region.flatrate if region else None
-                        seen: list[str] = []
-                        for p in (flatrate or []):
-                            norm = _normalize_provider_name(p.provider_name)
-                            if norm and norm not in seen:
-                                seen.append(norm)
-                        det.networks = seen
-                    except Exception as e:
-                        LOGGER.warning(f"TMDb watch_providers fetch failed for id={item_id}: {e}")
-                        det.networks = []
+                #----- saber donde ver HOY. Lo pisamos con el proveedor de streaming real
+                #----- (ej. "Paramount Plus", o "Apple TV" si solo esta en renta/compra).
+                async with API_SEMAPHORE:
+                    det.networks = await _fetch_networks(target, item_id)
             return det
         except Exception as e:
             LOGGER.warning(f"TMDb {media_type} details fetch failed for id={item_id}: {e}")
@@ -348,6 +356,7 @@ def build_movie_payload(movie, quality, encoded_string) -> dict:
         "runtime": str(format_runtime(getattr(movie, "runtime", None))),
         "media_type": "movie",
         "genres": [g.name for g in (movie.genres or [])],
+        "networks": list(getattr(movie, "networks", None) or []),
         "original_language": getattr(movie, "original_language", None),
         "origin_country": _tmdb_country_codes(movie),
         "quality": quality,
@@ -384,7 +393,7 @@ def build_tv_payload(tv, ep, season, episode, quality, encoded_string) -> dict:
             getattr(getattr(tv, "external_ids", None), "imdb_id", None)
         ),
         "genres": [g.name for g in (tv.genres or [])],
-        "networks": [n.name for n in (getattr(tv, "networks", None) or [])],
+        "networks": list(getattr(tv, "networks", None) or []),
         "media_type": "tv",
         "cast": _extract_cast(tv),
         "runtime": str(runtime),

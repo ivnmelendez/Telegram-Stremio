@@ -81,6 +81,7 @@ class MovieSchema(BaseModel):
     release_year: Optional[int] = None
     release_year_end: Optional[int] = None
     release_date: Optional[str] = None
+    networks: Optional[List[str]] = Field(default_factory=list)
     poster: Optional[str] = None
     backdrop: Optional[str] = None
     logo: Optional[str] = None

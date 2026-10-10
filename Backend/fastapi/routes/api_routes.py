@@ -3038,13 +3038,13 @@ async def list_xtream_categories_api(media_type: str) -> dict:
     overrides = {d["key"]: d for d in await db.list_xtream_categories(media_type)}
     counts = await xtream_routes.tag_counts(media_type)
 
-    if media_type == "movie":
-        raw_tags = sorted(await xtream_routes._movie_categories_set())
-    else:
-        #----- Series: solo plataformas en el menu de Xtream (ver xtream_routes.
-        #----- get_series_categories) - el panel admin refleja lo mismo.
-        _genres, networks = await xtream_routes._series_categories_set()
-        raw_tags = xtream_routes._ordered_platforms(networks)
+    #----- Movies y series: solo plataforma (ver xtream_routes.get_vod_categories/
+    #----- get_series_categories) - el panel admin refleja lo mismo.
+    platforms = await (
+        xtream_routes._movie_categories_set() if media_type == "movie"
+        else xtream_routes._series_categories_set()
+    )
+    raw_tags = xtream_routes._ordered_platforms(platforms)
 
     def _row(key: str, raw: str | None, override: dict) -> dict:
         tags = override.get("tags") or []
