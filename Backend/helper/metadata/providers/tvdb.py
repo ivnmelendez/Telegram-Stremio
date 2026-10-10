@@ -325,30 +325,24 @@ async def _iter_series_episodes(tvdb_id: int, order: str = "default") -> list:
     return all_eps
 
 
-async def episode_translation(
-    episode_id: int,
-    lang: str = "eng",
-) -> Optional[dict]:
-    """Fetch episode translation, defaulting to English."""
+async def episode_translation(episode_id: int) -> Optional[dict]:
+    """Fetch episode translation, Spanish first, English fallback."""
     if not episode_id:
         return None
-    # Always use TVDB's English language code.
-    lang = "eng"
 
-    cache_key = f"tvdb_ep_tr::{episode_id}::{lang}"
+    async def _fetch(lang: str) -> Optional[dict]:
+        cache_key = f"tvdb_ep_tr::{episode_id}::{lang}"
 
-    async def _produce():
-        data = await _get(
-            f"/episodes/{episode_id}/translations/{lang}"
-        )
-        return (data or {}).get("data")
+        async def _produce():
+            data = await _get(f"/episodes/{episode_id}/translations/{lang}")
+            return (data or {}).get("data")
 
-    return await cached_call(
-        TVDB_CACHE,
-        cache_key,
-        "tvdb_ep_tr",
-        _produce,
-    )
+        return await cached_call(TVDB_CACHE, cache_key, "tvdb_ep_tr", _produce)
+
+    spa = await _fetch("spa")
+    if spa and (spa.get("name") or spa.get("overview")):
+        return spa
+    return await _fetch("eng")
 
 async def episode_by_absolute(tvdb_id: int, absolute: int) -> Optional[dict]:
     cache_key = f"tvdb_abs::{tvdb_id}::{absolute}"
@@ -404,31 +398,45 @@ def _remote_ids(doc: dict) -> tuple:
     return imdb_id, tmdb_id
 
 
-def _english_translation(doc: dict) -> tuple[Optional[str], Optional[str]]:
+def _translation_for(doc: dict, langs: tuple) -> tuple[Optional[str], Optional[str]]:
+    """Pick name/overview translations, preferring the first matching lang in `langs`."""
     tr = doc.get("translations") or {}
+    lang_keys = {l.lower() for l in langs}
 
-    eng_name = None
+    name = None
     for item in tr.get("nameTranslations") or []:
         if not isinstance(item, dict) or item.get("isAlias"):
             continue
 
         language = str(item.get("language") or "").lower()
-        if language in ("eng", "en") and item.get("name"):
+        if language in lang_keys and item.get("name"):
             if item.get("isPrimary"):
-                eng_name = item["name"]
+                name = item["name"]
                 break
-            eng_name = eng_name or item["name"]
+            name = name or item["name"]
 
-    eng_overview = None
+    overview = None
     for item in tr.get("overviewTranslations") or []:
         if not isinstance(item, dict):
             continue
 
         language = str(item.get("language") or "").lower()
-        if language in ("eng", "en"):
-            eng_overview = item.get("overview") or eng_overview
+        if language in lang_keys:
+            overview = item.get("overview") or overview
 
-    return eng_name, eng_overview
+    return name, overview
+
+
+def _localized_translation(doc: dict) -> tuple[Optional[str], Optional[str]]:
+    """Spanish (Mexico) first, English fallback - TVDB only exposes generic 'spa'."""
+    name, overview = _translation_for(doc, ("spa", "spa-mx"))
+    if not name:
+        eng_name, _ = _translation_for(doc, ("eng", "en"))
+        name = eng_name
+    if not overview:
+        _, eng_overview = _translation_for(doc, ("eng", "en"))
+        overview = overview or eng_overview
+    return name, overview
 
 
 def _genres(doc: dict) -> list:
@@ -480,20 +488,20 @@ async def build_series_payload(
     ep_overview = (ep or {}).get("overview") or ""
     ep_aired = (ep or {}).get("aired") or (ep or {}).get("firstAired") or ""
     title = series.get("name") or series.get("slug") or ""
-    eng_name, eng_overview = _english_translation(series)
-    ep_eng_name, ep_eng_overview = _english_translation(ep or {})
-    ep_title = ep_eng_name or ep_title
-    ep_overview = ep_eng_overview or ep_overview
+    loc_name, loc_overview = _localized_translation(series)
+    ep_loc_name, ep_loc_overview = _localized_translation(ep or {})
+    ep_title = ep_loc_name or ep_title
+    ep_overview = ep_loc_overview or ep_overview
     payload = {
         "tmdb_id": tmdb_id,
         "imdb_id": imdb_id,
-        "title": eng_name or title,
-        "title_english": eng_name or title,
+        "title": loc_name or title,
+        "title_english": loc_name or title,
         "original_title": series.get("name") or "",
         "year": year,
         "year_end": year_end,
         "rate": rate,
-        "description": eng_overview or series.get("overview") or "",
+        "description": loc_overview or series.get("overview") or "",
         "poster": poster,
         "backdrop": backdrop,
         "logo": logo,
@@ -537,17 +545,17 @@ async def build_movie_payload(movie: dict, quality, encoded_string) -> dict:
         rate = await _imdb_fallback_rating(imdb_id, "movie")
     runtime = movie.get("runtime")
     title = movie.get("name") or movie.get("slug") or ""
-    eng_name, eng_overview = _english_translation(movie)
+    loc_name, loc_overview = _localized_translation(movie)
     payload = {
         "tmdb_id": tmdb_id,
         "imdb_id": imdb_id,
-        "title": eng_name or title,
-        "title_english": eng_name or title,
+        "title": loc_name or title,
+        "title_english": loc_name or title,
         "original_title": movie.get("name") or "",
         "year": year,
         "year_end": year_end,
         "rate": rate,
-        "description": eng_overview or movie.get("overview") or "",
+        "description": loc_overview or movie.get("overview") or "",
         "poster": poster,
         "backdrop": backdrop,
         "logo": logo,
