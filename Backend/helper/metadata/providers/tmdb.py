@@ -261,8 +261,13 @@ async def details(media_type: str, item_id):
                 if media_type == "tv":
                     try:
                         wp = await target.watch_providers()
-                        mx = (wp.results or {}).get("MX") if wp else None
-                        flatrate = mx.flatrate if mx else None
+                        results = wp.results or {} if wp else {}
+                        #----- MX a veces no tiene datos (titulos no-US sin
+                        #----- licencia registrada en TMDB para Mexico, ej.
+                        #----- producciones argentinas) - USA como fallback
+                        #----- antes de dejar la serie sin plataforma.
+                        region = results.get("MX") or results.get("US")
+                        flatrate = region.flatrate if region else None
                         seen: list[str] = []
                         for p in (flatrate or []):
                             norm = _normalize_provider_name(p.provider_name)

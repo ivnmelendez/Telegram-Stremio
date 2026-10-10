@@ -537,9 +537,14 @@ async def player_api(request: Request):
         return {"user_info": _user_info(token_data, username), "server_info": _server_info()}
 
     if action == "get_vod_categories":
+        #----- Sin categoria sintetica "Todas las peliculas" - ningun proveedor
+        #----- real la lista, y clientes que agrupan el dump completo por
+        #----- category_id (en vez de volver a pedir al server) terminaban
+        #----- mostrando solo el titulo suelto sin plataforma/genero bajo esa
+        #----- fila. La pestana nativa "Movies" del cliente ya cubre "todas".
         overrides = await _category_overrides("movie")
         genres = await _movie_categories_set()
-        cats = [{"category_id": ALL_MOVIES_CATEGORY_ID, "category_name": ALL_MOVIES_CATEGORY_NAME, "parent_id": 0}]
+        cats = []
         if any(_is_estreno(m) for m in await _all_movies()):
             cats.append({
                 "category_id": ESTRENOS_CATEGORY_ID,
@@ -549,16 +554,15 @@ async def player_api(request: Request):
         cats += _build_category_list(overrides, "movie_genre", sorted(genres))
         return cats
     if action == "get_series_categories":
-        #----- Solo plataformas de streaming, nunca genero - el admin decidio
-        #----- que el menu de series sea limpio (Netflix/HBO Max/etc), no por
-        #----- genero. Series sin plataforma detectada solo quedan accesibles
-        #----- vía "Todas las series" (su category_id interno sigue existiendo,
-        #----- simplemente no aparece como entrada propia en el menu).
+        #----- Solo plataformas de streaming, nunca genero (igual que arriba),
+        #----- y sin categoria sintetica "Todas las series" por la misma razon
+        #----- que get_vod_categories. Series sin plataforma detectada no
+        #----- aparecen en ninguna fila de categoria, pero siguen existiendo
+        #----- en la pestana nativa "Series" del cliente.
         overrides = await _category_overrides("series")
         _genres, networks = await _series_categories_set()
         raw_tags = _ordered_platforms(networks)
-        cats = [{"category_id": ALL_SERIES_CATEGORY_ID, "category_name": ALL_SERIES_CATEGORY_NAME, "parent_id": 0}]
-        cats += _build_category_list(overrides, "series_tag", raw_tags)
+        cats = _build_category_list(overrides, "series_tag", raw_tags)
         return cats
     if action in ("get_live_categories", "get_live_streams"):
         return []
