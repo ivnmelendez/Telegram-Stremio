@@ -328,6 +328,20 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
 
+    #----- A movie that's both an Estreno AND Trending would otherwise repeat
+    #----- the SAME stream_id in 3 different category rows (genre + Estrenos +
+    #----- Tendencia) in the unfiltered dump. The reference provider we
+    #----- verified against only ever reuses an id across 2 rows (it doesn't
+    #----- even have a Trending category) - untested territory for a 3rd reuse,
+    #----- so give the Tendencia placement its own id whenever this overlap
+    #----- happens, keeping every id to at most 2 occurrences.
+    overlap_movies = [m for m in movies if _is_estreno(m) and m.get("tmdb_id") in trending]
+    overlap_id_map = {}
+    if overlap_movies:
+        overlap_id_map = await db.upsert_xtream_stream_ids_bulk(
+            [(m["imdb_id"], "movie", None, "trending") for m in overlap_movies]
+        )
+
     def _row(m: dict, cat: str, sid: int) -> dict:
         return {
             "num": sid,
@@ -367,11 +381,12 @@ async def _list_vod_streams(category_id: str = None) -> list:
         #----- reference provider: same stream_id repeated across both category
         #----- rows for the same title).
         sid = id_map[f"{imdb_id}:None:None"]
+        trending_sid = overlap_id_map[f"{imdb_id}:None:trending"] if (is_estreno and is_trending) else sid
         if category_id == ESTRENOS_CATEGORY_ID:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
             continue
         if category_id == TRENDING_CATEGORY_ID:
-            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, sid)))
+            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, trending_sid)))
             continue
         if category_id:
             out.append(_row(m, category_id, sid))
@@ -386,7 +401,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
         if is_estreno:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
         if is_trending:
-            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, sid)))
+            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, trending_sid)))
 
     #----- Estrenos: recien agregado primero (added = updated_on, ya viene en
     #----- la fila) - el cliente nunca re-pide con category_id (confirmado por
