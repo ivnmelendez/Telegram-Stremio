@@ -1330,6 +1330,7 @@ class Database:
                 is_anime=metadata_info.get('is_anime', False),
                 original_language=metadata_info.get('original_language'),
                 origin_country=metadata_info.get('origin_country', []) or [],
+                release_date=metadata_info.get('release_date') or None,
                 telegram=[quality_detail]
             )
             return await self.update_movie(media, status)

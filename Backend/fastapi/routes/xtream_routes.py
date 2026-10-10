@@ -119,6 +119,20 @@ ALL_SERIES_CATEGORY_ID = "2"
 ALL_MOVIES_CATEGORY_NAME = "Todas las películas"
 ALL_SERIES_CATEGORY_NAME = "Todas las series"
 
+#----- "Estrenos <year>" - a movie's year, not genre/platform - so it's a
+#----- second category a title can belong to alongside its genre, not a
+#----- replacement. Fixed id (year only changes the label) so it never
+#----- collides with crc32-based genre ids.
+ESTRENOS_CATEGORY_ID = "3"
+
+
+def _estreno_year() -> int:
+    return datetime.now().year
+
+
+def _is_estreno(movie: dict) -> bool:
+    return movie.get("release_year") == _estreno_year()
+
 
 async def _all_movies() -> list:
     async def _load():
@@ -313,6 +327,8 @@ async def _list_vod_streams(category_id: str = None) -> list:
         primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
         primary_id = _category_id("movie_genre", primary) if primary else None
         cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
+        if _is_estreno(m):
+            cat_ids.append(ESTRENOS_CATEGORY_ID)
         if category_id and category_id not in cat_ids:
             continue
         #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - el cliente
@@ -336,9 +352,14 @@ async def _list_vod_streams(category_id: str = None) -> list:
             "container_extension": "mkv",
             "custom_sid": "",
             "direct_source": "",
+            "_release_date": m.get("release_date") or "",
         })
-    if category_id and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
+    if category_id == ESTRENOS_CATEGORY_ID:
+        out.sort(key=lambda it: it["_release_date"], reverse=True)
+    elif category_id and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
+    for it in out:
+        it.pop("_release_date", None)
     return out
 
 
@@ -519,6 +540,12 @@ async def player_api(request: Request):
         overrides = await _category_overrides("movie")
         genres = await _movie_categories_set()
         cats = [{"category_id": ALL_MOVIES_CATEGORY_ID, "category_name": ALL_MOVIES_CATEGORY_NAME, "parent_id": 0}]
+        if any(_is_estreno(m) for m in await _all_movies()):
+            cats.append({
+                "category_id": ESTRENOS_CATEGORY_ID,
+                "category_name": f"Estrenos {_estreno_year()}",
+                "parent_id": 0,
+            })
         cats += _build_category_list(overrides, "movie_genre", sorted(genres))
         return cats
     if action == "get_series_categories":
