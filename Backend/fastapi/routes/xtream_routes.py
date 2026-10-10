@@ -336,11 +336,10 @@ async def _list_vod_streams(category_id: str = None) -> list:
             "container_extension": "mkv",
             "custom_sid": "",
             "direct_source": "",
-            "_release_date": m.get("release_date") or "",
         }
 
     out = []
-    estreno_rows = []  #----- collected separately, sorted by release_date, appended at the end
+    estreno_rows = []  #----- collected separately, sorted by "added", appended at the end
     for m in movies:
         imdb_id = m["imdb_id"]
         primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
@@ -372,16 +371,15 @@ async def _list_vod_streams(category_id: str = None) -> list:
         if is_estreno:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
 
-    #----- Estrenos always newest release first - the client never re-queries
-    #----- with category_id (confirmed via logs), so this order has to already
-    #----- be correct in the single unfiltered dump it actually uses.
-    estreno_rows.sort(key=lambda it: it["_release_date"], reverse=True)
+    #----- Estrenos: recien agregado primero (added = updated_on, ya viene en
+    #----- la fila) - el cliente nunca re-pide con category_id (confirmado por
+    #----- logs), asi que el orden tiene que venir correcto desde el dump sin
+    #----- filtrar que realmente usa.
+    estreno_rows.sort(key=lambda it: it["added"], reverse=True)
     out += estreno_rows
 
     if category_id and category_id != ESTRENOS_CATEGORY_ID and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
-    for it in out:
-        it.pop("_release_date", None)
     return out
 
 
