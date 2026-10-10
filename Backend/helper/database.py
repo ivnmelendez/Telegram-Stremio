@@ -2966,3 +2966,52 @@ class Database:
 
         updated_doc = await collection.find_one({"_id": source_id})
         return convert_objectid_to_str(updated_doc) if updated_doc else None
+
+    #----- Refresh episode title/overview in Spanish (TMDB es-MX) for every
+    #----- season already stored. replace_media_metadata() deliberately leaves
+    #----- `seasons` untouched (keeps uploaded files safe), so a manual rescan
+    #----- fixes the show's title/description but not its episode titles -
+    #----- this closes that gap right after a rescan picks a new tmdb_id.
+    async def refresh_tv_episode_titles(self, db_index: int, tmdb_id: int) -> int:
+        from Backend.helper.metadata.providers import tmdb as tmdb_provider
+
+        db_key = f"storage_{db_index}"
+        collection = self.dbs[db_key]["tv"]
+        doc = await collection.find_one({"tmdb_id": int(tmdb_id)})
+        if not doc:
+            return 0
+
+        updated = 0
+        for season in doc.get("seasons") or []:
+            season_number = season.get("season_number")
+            for episode in season.get("episodes") or []:
+                episode_number = episode.get("episode_number")
+                if season_number is None or episode_number is None:
+                    continue
+                try:
+                    ep = await tmdb_provider.episode_details(tmdb_id, season_number, episode_number)
+                except Exception:
+                    continue
+                if not ep:
+                    continue
+                new_title = getattr(ep, "name", None)
+                new_overview = getattr(ep, "overview", None)
+                if not new_title and not new_overview:
+                    continue
+                if new_title == episode.get("title") and new_overview == episode.get("overview"):
+                    continue
+                await collection.update_one(
+                    {"_id": doc["_id"], "seasons.season_number": season_number},
+                    {
+                        "$set": {
+                            "seasons.$[s].episodes.$[e].title": new_title or episode.get("title"),
+                            "seasons.$[s].episodes.$[e].overview": new_overview or episode.get("overview"),
+                        }
+                    },
+                    array_filters=[
+                        {"s.season_number": season_number},
+                        {"e.episode_number": episode_number},
+                    ],
+                )
+                updated += 1
+        return updated

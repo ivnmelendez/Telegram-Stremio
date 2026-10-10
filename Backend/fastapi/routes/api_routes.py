@@ -1065,6 +1065,18 @@ async def apply_media_rescan_api(request: Request, tmdb_id: str | int, db_index:
     if not updated_doc:
         raise HTTPException(status_code=500, detail="Failed to replace media metadata.")
 
+    #----- replace_media_metadata() leaves `seasons` untouched (safe for
+    #----- uploaded files), so episode titles/overviews from the wrong earlier
+    #----- match stay stale otherwise - refresh them now against the corrected
+    #----- tmdb_id.
+    if media_type == "tv" and updated_doc.get("tmdb_id"):
+        try:
+            await db.refresh_tv_episode_titles(
+                updated_doc.get("db_index", db_index), updated_doc["tmdb_id"]
+            )
+        except Exception as e:
+            LOGGER.warning(f"Episode title refresh after rescan failed for tmdb_id={updated_doc.get('tmdb_id')}: {e}")
+
     return {
         "success": True,
         "message": "Metadata rescanned successfully.",
