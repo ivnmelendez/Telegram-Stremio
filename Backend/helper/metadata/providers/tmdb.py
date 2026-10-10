@@ -413,7 +413,8 @@ _TRENDING_TTL = 6 * 3600
 _trending_cache: dict = {}
 
 
-async def trending_ids(media_type: str) -> set:
+async def trending_ids(media_type: str) -> list:
+    """Weekly trending tmdb_ids, in TMDB's own rank order (most trending first)."""
     now = time.time()
     cached = _trending_cache.get(media_type)
     if cached and now - cached[0] < _TRENDING_TTL:
@@ -426,9 +427,9 @@ async def trending_ids(media_type: str) -> set:
                 if media_type == "movie"
                 else await client.trending().tv_weekly()
             )
-        ids = {item.id for item in (data.results or []) if getattr(item, "id", None)}
+        ids = [item.id for item in (data.results or []) if getattr(item, "id", None)]
     except Exception as e:
         LOGGER.warning(f"TMDb trending fetch failed for {media_type}: {e}")
-        ids = cached[1] if cached else set()
+        ids = cached[1] if cached else []
     _trending_cache[media_type] = (now, ids)
     return ids

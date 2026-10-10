@@ -371,7 +371,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
             continue
         if category_id == TRENDING_CATEGORY_ID:
-            trending_rows.append(_row(m, TRENDING_CATEGORY_ID, sid))
+            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, sid)))
             continue
         if category_id:
             out.append(_row(m, category_id, sid))
@@ -386,7 +386,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
         if is_estreno:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
         if is_trending:
-            trending_rows.append(_row(m, TRENDING_CATEGORY_ID, sid))
+            trending_rows.append((m.get("tmdb_id"), _row(m, TRENDING_CATEGORY_ID, sid)))
 
     #----- Estrenos: recien agregado primero (added = updated_on, ya viene en
     #----- la fila) - el cliente nunca re-pide con category_id (confirmado por
@@ -394,7 +394,10 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- filtrar que realmente usa.
     estreno_rows.sort(key=lambda it: it["added"], reverse=True)
     out += estreno_rows
-    out += trending_rows
+    #----- Tendencia: mismo orden exacto que manda TMDB (mas "trending" primero).
+    trending_rank = {tid: i for i, tid in enumerate(trending)}
+    trending_rows.sort(key=lambda pair: trending_rank.get(pair[0], 9999))
+    out += [row for _tid, row in trending_rows]
 
     if category_id and category_id not in (ESTRENOS_CATEGORY_ID, TRENDING_CATEGORY_ID) and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
@@ -444,7 +447,7 @@ async def _list_series(category_id: str = None) -> list:
 
         sid = id_map[f"{imdb_id}:None:None"]
         if category_id == TRENDING_CATEGORY_ID:
-            trending_rows.append(_row(s, TRENDING_CATEGORY_ID, sid))
+            trending_rows.append((s.get("tmdb_id"), _row(s, TRENDING_CATEGORY_ID, sid)))
             continue
         if category_id:
             out.append(_row(s, category_id, sid))
@@ -454,9 +457,12 @@ async def _list_series(category_id: str = None) -> list:
         #----- it qualifies - same reasoning as _list_vod_streams.
         out.append(_row(s, primary_id or ALL_SERIES_CATEGORY_ID, sid))
         if is_trending:
-            trending_rows.append(_row(s, TRENDING_CATEGORY_ID, sid))
+            trending_rows.append((s.get("tmdb_id"), _row(s, TRENDING_CATEGORY_ID, sid)))
 
-    out += trending_rows
+    #----- Mismo orden que manda TMDB (mas "trending" primero).
+    trending_rank = {tid: i for i, tid in enumerate(trending)}
+    trending_rows.sort(key=lambda pair: trending_rank.get(pair[0], 9999))
+    out += [row for _tid, row in trending_rows]
     if category_id and category_id != TRENDING_CATEGORY_ID and _sort_mode_for(overrides, "series_tag", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
     return out
