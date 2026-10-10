@@ -83,6 +83,23 @@ async def resolve_movie(
 
 # ── Series: TVDB > Cinemeta > TMDB ────────────────────────────────────────────
 
+#----- TVDB and Cinemeta payloads never set `networks` (neither provider has
+#----- "where to watch" data) - only a direct TMDB hit does. Series resolved
+#----- via TVDB/Cinemeta would otherwise never get a streaming-platform
+#----- category. Enrich with a TMDB lookup (MX, falls back to US) whenever we
+#----- have a tmdb_id and networks came back empty.
+async def _enrich_series_networks(result: Optional[dict]) -> Optional[dict]:
+    if not result or result.get("networks") or not result.get("tmdb_id"):
+        return result
+    try:
+        tv = await tmdb.details("tv", result["tmdb_id"])
+        if tv:
+            result["networks"] = list(getattr(tv, "networks", None) or [])
+    except Exception as e:
+        LOGGER.debug(f"[SERIES] networks enrichment failed for tmdb_id={result.get('tmdb_id')}: {e}")
+    return result
+
+
 async def resolve_series(
     title: str,
     season: int,
@@ -119,7 +136,7 @@ async def resolve_series(
         )
         if result:
             LOGGER.info(f"[SERIES] TVDB hit for '{title}' S{season:02d}E{episode:02d}")
-            return result
+            return await _enrich_series_networks(result)
     except Exception as e:
         LOGGER.warning(f"[SERIES] TVDB error for '{title}': {e}")
 
@@ -143,9 +160,9 @@ async def resolve_series(
                         if tv:
                             tv_ep = await tmdb.episode_details(es_item.id, season, episode)
                             return tmdb.build_tv_payload(tv, tv_ep, season, episode, quality, encoded_string)
-                    return cinemeta.build_tv_payload(
+                    return await _enrich_series_networks(cinemeta.build_tv_payload(
                         detail, ep or {}, imdb_id, title, season, episode, quality, encoded_string
-                    )
+                    ))
                 LOGGER.info(
                     f"[SERIES] Cinemeta title mismatch for '{title}': "
                     f"got '{detail.get('title')}' (sim={sim:.2f})"
