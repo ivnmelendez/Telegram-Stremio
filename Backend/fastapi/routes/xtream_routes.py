@@ -10,6 +10,7 @@ from Backend import db
 from Backend.fastapi.routes.stremio_routes import get_resolution_priority, parse_size_to_bytes, stream_res_label
 from Backend.fastapi.security.tokens import verify_token
 from Backend.helper.cf_stream import cf_enabled, cf_stream_url
+from Backend.helper.metadata.providers import tmdb as tmdb_provider
 from Backend.helper.passwords import verify_password
 from Backend.helper.settings_manager import SettingsManager
 
@@ -124,6 +125,11 @@ ALL_SERIES_CATEGORY_NAME = "Todas las series"
 #----- replacement. Fixed id (year only changes the label) so it never
 #----- collides with crc32-based genre ids.
 ESTRENOS_CATEGORY_ID = "3"
+
+#----- "En tendencia" - TMDB's weekly trending ranking, global and unrelated
+#----- to genre/platform/upload date. Same media_type-scoped id reuse pattern
+#----- as ESTRENOS_CATEGORY_ID: movie and series category spaces never mix.
+TRENDING_CATEGORY_ID = "4"
 
 
 def _estreno_year() -> int:
@@ -317,6 +323,7 @@ def _build_category_list(overrides: dict, prefix: str, raw_tags: list) -> list:
 async def _list_vod_streams(category_id: str = None) -> list:
     movies = [m for m in await _all_movies() if m.get("imdb_id")]
     overrides = await _category_overrides("movie")
+    trending = await tmdb_provider.trending_ids("movie")
     #----- One round-trip for every stream id in this response, instead of one
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
@@ -340,14 +347,18 @@ async def _list_vod_streams(category_id: str = None) -> list:
 
     out = []
     estreno_rows = []  #----- collected separately, sorted by "added", appended at the end
+    trending_rows = []
     for m in movies:
         imdb_id = m["imdb_id"]
         primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
         primary_id = _category_id("movie_genre", primary) if primary else None
         is_estreno = _is_estreno(m)
+        is_trending = m.get("tmdb_id") in trending
         cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
         if is_estreno:
             cat_ids.append(ESTRENOS_CATEGORY_ID)
+        if is_trending:
+            cat_ids.append(TRENDING_CATEGORY_ID)
         if category_id and category_id not in cat_ids:
             continue
 
@@ -359,17 +370,23 @@ async def _list_vod_streams(category_id: str = None) -> list:
         if category_id == ESTRENOS_CATEGORY_ID:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
             continue
+        if category_id == TRENDING_CATEGORY_ID:
+            trending_rows.append(_row(m, TRENDING_CATEGORY_ID, sid))
+            continue
         if category_id:
             out.append(_row(m, category_id, sid))
             continue
 
         #----- Unfiltered dump: one row for its primary category (same as
-        #----- always), PLUS a second row for Estrenos if it qualifies - this
-        #----- is the only way a client that groups this single response
-        #----- client-side ever discovers the Estrenos entries at all.
+        #----- always), PLUS a second row per extra category (Estrenos,
+        #----- Tendencia) it qualifies for - this is the only way a client
+        #----- that groups this single response client-side ever discovers
+        #----- those entries at all.
         out.append(_row(m, primary_id or ALL_MOVIES_CATEGORY_ID, sid))
         if is_estreno:
             estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
+        if is_trending:
+            trending_rows.append(_row(m, TRENDING_CATEGORY_ID, sid))
 
     #----- Estrenos: recien agregado primero (added = updated_on, ya viene en
     #----- la fila) - el cliente nunca re-pide con category_id (confirmado por
@@ -377,8 +394,9 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- filtrar que realmente usa.
     estreno_rows.sort(key=lambda it: it["added"], reverse=True)
     out += estreno_rows
+    out += trending_rows
 
-    if category_id and category_id != ESTRENOS_CATEGORY_ID and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
+    if category_id and category_id not in (ESTRENOS_CATEGORY_ID, TRENDING_CATEGORY_ID) and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
     return out
 
@@ -386,28 +404,11 @@ async def _list_vod_streams(category_id: str = None) -> list:
 async def _list_series(category_id: str = None) -> list:
     shows = [s for s in await _all_tv_shows() if s.get("imdb_id")]
     overrides = await _category_overrides("series")
+    trending = await tmdb_provider.trending_ids("tv")
     id_map = await db.upsert_xtream_stream_ids_bulk([(s["imdb_id"], "tv", None, None) for s in shows])
 
-    out = []
-    for s in shows:
-        imdb_id = s["imdb_id"]
-        primary, kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
-        effective = _effective_tag(overrides, primary)
-        #----- Genero crudo ya no se lista como categoria propia (solo
-        #----- plataforma) - si no fue fusionado a mano en una categoria
-        #----- manual, cae al catch-all en vez de un category_id huerfano
-        #----- que el cliente no reconoce ("Unknown").
-        if effective == primary and kind != "platform":
-            effective = None
-        primary_id = _category_id("series_tag", effective) if effective else None
-        cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
-        if category_id and category_id not in cat_ids:
-            continue
-        #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - mismo motivo
-        #----- que en _list_vod_streams.
-        cat = category_id or primary_id or ALL_SERIES_CATEGORY_ID
-        sid = id_map[f"{imdb_id}:None:None"]
-        out.append({
+    def _row(s: dict, cat: str, sid: int) -> dict:
+        return {
             "num": sid,
             "series_id": sid,
             "name": s.get("title") or "Untitled",
@@ -419,8 +420,44 @@ async def _list_series(category_id: str = None) -> list:
             "category_id": cat,
             "rating": str(s.get("rating") or ""),
             "rating_5based": round((s.get("rating") or 0) / 2, 1),
-        })
-    if category_id and _sort_mode_for(overrides, "series_tag", category_id) == "title_asc":
+        }
+
+    out = []
+    trending_rows = []
+    for s in shows:
+        imdb_id = s["imdb_id"]
+        primary, kind = _primary_series_tag(s.get("genres") or [], s.get("networks") or [])
+        effective = _effective_tag(overrides, primary)
+        #----- Genero crudo ya no se lista como categoria propia (solo
+        #----- plataforma) - si no fue fusionado a mano en una categoria
+        #----- manual, cae al catch-all en vez de un category_id huerfano
+        #----- que el cliente no reconoce ("Unknown").
+        if effective == primary and kind != "platform":
+            effective = None
+        primary_id = _category_id("series_tag", effective) if effective else None
+        is_trending = s.get("tmdb_id") in trending
+        cat_ids = [ALL_SERIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
+        if is_trending:
+            cat_ids.append(TRENDING_CATEGORY_ID)
+        if category_id and category_id not in cat_ids:
+            continue
+
+        sid = id_map[f"{imdb_id}:None:None"]
+        if category_id == TRENDING_CATEGORY_ID:
+            trending_rows.append(_row(s, TRENDING_CATEGORY_ID, sid))
+            continue
+        if category_id:
+            out.append(_row(s, category_id, sid))
+            continue
+
+        #----- Unfiltered dump: primary-category row, plus a Tendencia row if
+        #----- it qualifies - same reasoning as _list_vod_streams.
+        out.append(_row(s, primary_id or ALL_SERIES_CATEGORY_ID, sid))
+        if is_trending:
+            trending_rows.append(_row(s, TRENDING_CATEGORY_ID, sid))
+
+    out += trending_rows
+    if category_id and category_id != TRENDING_CATEGORY_ID and _sort_mode_for(overrides, "series_tag", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
     return out
 
@@ -564,13 +601,17 @@ async def player_api(request: Request):
         #----- fila. La pestana nativa "Movies" del cliente ya cubre "todas".
         overrides = await _category_overrides("movie")
         genres = await _movie_categories_set()
+        all_movies = await _all_movies()
         cats = []
-        if any(_is_estreno(m) for m in await _all_movies()):
+        if any(_is_estreno(m) for m in all_movies):
             cats.append({
                 "category_id": ESTRENOS_CATEGORY_ID,
                 "category_name": f"Estrenos {_estreno_year()}",
                 "parent_id": 0,
             })
+        trending = await tmdb_provider.trending_ids("movie")
+        if trending and any(m.get("tmdb_id") in trending for m in all_movies):
+            cats.append({"category_id": TRENDING_CATEGORY_ID, "category_name": "En tendencia", "parent_id": 0})
         cats += _build_category_list(overrides, "movie_genre", sorted(genres))
         return cats
     if action == "get_series_categories":
@@ -582,7 +623,11 @@ async def player_api(request: Request):
         overrides = await _category_overrides("series")
         _genres, networks = await _series_categories_set()
         raw_tags = _ordered_platforms(networks)
-        cats = _build_category_list(overrides, "series_tag", raw_tags)
+        cats = []
+        trending = await tmdb_provider.trending_ids("tv")
+        if trending and any(s.get("tmdb_id") in trending for s in await _all_tv_shows()):
+            cats.append({"category_id": TRENDING_CATEGORY_ID, "category_name": "En tendencia", "parent_id": 0})
+        cats += _build_category_list(overrides, "series_tag", raw_tags)
         return cats
     if action in ("get_live_categories", "get_live_streams"):
         return []

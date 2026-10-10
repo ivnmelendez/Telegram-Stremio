@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import re
+import time
 
 from themoviedb import aioTMDb
 
@@ -403,3 +404,31 @@ def build_tv_payload(tv, ep, season, episode, quality, encoded_string) -> dict:
         "encoded_string": encoded_string,
     }
     return ensure_media_ids(payload, seed=f"tmdb:tv:{tv.id}")
+
+
+#----- Weekly trending movie/tv tmdb_ids, used by the Xtream "En tendencia"
+#----- category. Global TMDB ranking, unrelated to our catalog or uploads -
+#----- just refetch on a long TTL instead of recomputing per request.
+_TRENDING_TTL = 6 * 3600
+_trending_cache: dict = {}
+
+
+async def trending_ids(media_type: str) -> set:
+    now = time.time()
+    cached = _trending_cache.get(media_type)
+    if cached and now - cached[0] < _TRENDING_TTL:
+        return cached[1]
+    client = get_tmdb_client()
+    try:
+        async with API_SEMAPHORE:
+            data = (
+                await client.trending().movie_weekly()
+                if media_type == "movie"
+                else await client.trending().tv_weekly()
+            )
+        ids = {item.id for item in (data.results or []) if getattr(item, "id", None)}
+    except Exception as e:
+        LOGGER.warning(f"TMDb trending fetch failed for {media_type}: {e}")
+        ids = cached[1] if cached else set()
+    _trending_cache[media_type] = (now, ids)
+    return ids
