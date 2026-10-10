@@ -321,22 +321,6 @@ async def _list_vod_streams(category_id: str = None) -> list:
     #----- await per title (slow with thousands of movies in the catalog).
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
 
-    #----- A movie that belongs to its genre AND Estrenos needs a DIFFERENT
-    #----- stream_id for the Estrenos placement. The Xtream Codes protocol has
-    #----- no "category_ids" (plural/array) field - a stream row only ever
-    #----- declares ONE category_id - and IPTV clients that build their menu by
-    #----- grouping the single unfiltered dump (instead of re-querying per
-    #----- category, confirmed via server logs) index VOD items by stream_id:
-    #----- reusing the same id for a second category makes that copy look
-    #----- "already seen" and it's silently dropped. Both ids resolve back to
-    #----- the same imdb_id at playback time, so it's still the same file.
-    estreno_movies = [m for m in movies if _is_estreno(m)]
-    estreno_id_map = {}
-    if estreno_movies:
-        estreno_id_map = await db.upsert_xtream_stream_ids_bulk(
-            [(m["imdb_id"], "movie", None, "estrenos") for m in estreno_movies]
-        )
-
     def _row(m: dict, cat: str, sid: int) -> dict:
         return {
             "num": sid,
@@ -356,6 +340,7 @@ async def _list_vod_streams(category_id: str = None) -> list:
         }
 
     out = []
+    estreno_rows = []  #----- collected separately, sorted by release_date, appended at the end
     for m in movies:
         imdb_id = m["imdb_id"]
         primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
@@ -367,27 +352,33 @@ async def _list_vod_streams(category_id: str = None) -> list:
         if category_id and category_id not in cat_ids:
             continue
 
-        canonical_sid = id_map[f"{imdb_id}:None:None"]
+        #----- Same stream_id regardless of which category row this is - matches
+        #----- how real Xtream providers do it (verified against a live
+        #----- reference provider: same stream_id repeated across both category
+        #----- rows for the same title).
+        sid = id_map[f"{imdb_id}:None:None"]
         if category_id == ESTRENOS_CATEGORY_ID:
-            #----- Explicit Estrenos-only request (client actually re-queried).
-            out.append(_row(m, ESTRENOS_CATEGORY_ID, estreno_id_map[f"{imdb_id}:None:estrenos"]))
+            estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
             continue
         if category_id:
-            #----- Explicit genre/platform/manual-category request.
-            out.append(_row(m, category_id, canonical_sid))
+            out.append(_row(m, category_id, sid))
             continue
 
         #----- Unfiltered dump: one row for its primary category (same as
         #----- always), PLUS a second row for Estrenos if it qualifies - this
         #----- is the only way a client that groups this single response
         #----- client-side ever discovers the Estrenos entries at all.
-        out.append(_row(m, primary_id or ALL_MOVIES_CATEGORY_ID, canonical_sid))
+        out.append(_row(m, primary_id or ALL_MOVIES_CATEGORY_ID, sid))
         if is_estreno:
-            out.append(_row(m, ESTRENOS_CATEGORY_ID, estreno_id_map[f"{imdb_id}:None:estrenos"]))
+            estreno_rows.append(_row(m, ESTRENOS_CATEGORY_ID, sid))
 
-    if category_id == ESTRENOS_CATEGORY_ID:
-        out.sort(key=lambda it: it["_release_date"], reverse=True)
-    elif category_id and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
+    #----- Estrenos always newest release first - the client never re-queries
+    #----- with category_id (confirmed via logs), so this order has to already
+    #----- be correct in the single unfiltered dump it actually uses.
+    estreno_rows.sort(key=lambda it: it["_release_date"], reverse=True)
+    out += estreno_rows
+
+    if category_id and category_id != ESTRENOS_CATEGORY_ID and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
         out.sort(key=lambda it: it["name"].lower())
     for it in out:
         it.pop("_release_date", None)
