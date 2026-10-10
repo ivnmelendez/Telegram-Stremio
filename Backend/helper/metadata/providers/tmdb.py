@@ -63,6 +63,16 @@ _PLATFORM_ALIASES = (
     ("hulu", "Hulu"),
     ("vix", "ViX"),
     ("max", "HBO Max"),
+    ("mgm+", "MGM+"),
+    ("mgm plus", "MGM+"),
+    ("universal+", "Universal+"),
+    #----- Tiendas genericas de compra/renta (no son plataformas de
+    #----- suscripcion propias) - se agrupan bajo Apple TV en vez de crear
+    #----- una categoria suelta por cada una.
+    ("amazon video", "Apple TV"),
+    ("google play", "Apple TV"),
+    ("youtube", "Apple TV"),
+    ("fandango at home", "Apple TV"),
 )
 
 

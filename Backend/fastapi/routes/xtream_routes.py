@@ -206,6 +206,8 @@ _PLATFORM_DISPLAY = {
     "ViX": "🟧 ViX",
     "Hulu": "🟩 Hulu",
     "Peacock": "🟨 Peacock",
+    "MGM+": "🔶 MGM+",
+    "Universal+": "🟣 Universal+",
 }
 
 
