@@ -40,8 +40,36 @@ _PROVIDER_SUFFIX_RE = re.compile(
     r"\s+(Amazon Channel|Apple TV [Cc]hannel|Premium|Essential|Basic with Ads|Roku Premium Channel)$"
 )
 
+#----- TMDB's MX watch-provider names don't match the canonical labels in
+#----- xtream_routes._PLATFORM_DISPLAY (ej. "Amazon Prime Video" vs "Prime
+#----- Video", "Netflix Standard with Ads" vs "Netflix", "Paramount+" vs
+#----- "Paramount Plus"). Substring match (lowercased) -> canonical name, so
+#----- every variant collapses onto the same category instead of creating
+#----- duplicates or missing _PLATFORM_DISPLAY entirely.
+_PLATFORM_ALIASES = (
+    ("amazon prime video", "Prime Video"),
+    ("prime video", "Prime Video"),
+    ("disney plus", "Disney Plus"),
+    ("disney+", "Disney Plus"),
+    ("apple tv plus", "Apple TV"),
+    ("apple tv+", "Apple TV"),
+    ("apple tv", "Apple TV"),
+    ("hbo max", "HBO Max"),
+    ("paramount plus", "Paramount Plus"),
+    ("paramount+", "Paramount Plus"),
+    ("netflix", "Netflix"),
+    ("peacock", "Peacock"),
+    ("hulu", "Hulu"),
+    ("vix", "ViX"),
+    ("max", "HBO Max"),
+)
+
 
 def _normalize_provider_name(name: str) -> str:
+    low = name.lower()
+    for needle, canonical in _PLATFORM_ALIASES:
+        if needle in low:
+            return canonical
     prev = None
     while prev != name:
         prev = name

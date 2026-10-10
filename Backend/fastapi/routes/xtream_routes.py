@@ -516,9 +516,14 @@ async def player_api(request: Request):
         cats += _build_category_list(overrides, "movie_genre", sorted(genres))
         return cats
     if action == "get_series_categories":
+        #----- Solo plataformas de streaming, nunca genero - el admin decidio
+        #----- que el menu de series sea limpio (Netflix/HBO Max/etc), no por
+        #----- genero. Series sin plataforma detectada solo quedan accesibles
+        #----- vía "Todas las series" (su category_id interno sigue existiendo,
+        #----- simplemente no aparece como entrada propia en el menu).
         overrides = await _category_overrides("series")
-        genres, networks = await _series_categories_set()
-        raw_tags = _ordered_platforms(networks) + sorted(genres)
+        _genres, networks = await _series_categories_set()
+        raw_tags = _ordered_platforms(networks)
         cats = [{"category_id": ALL_SERIES_CATEGORY_ID, "category_name": ALL_SERIES_CATEGORY_NAME, "parent_id": 0}]
         cats += _build_category_list(overrides, "series_tag", raw_tags)
         return cats
