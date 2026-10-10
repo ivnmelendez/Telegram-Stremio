@@ -322,50 +322,69 @@ async def _list_vod_streams(category_id: str = None) -> list:
     id_map = await db.upsert_xtream_stream_ids_bulk([(m["imdb_id"], "movie", None, None) for m in movies])
 
     #----- A movie that belongs to its genre AND Estrenos needs a DIFFERENT
-    #----- stream_id for the Estrenos placement - IPTV clients index VOD items
-    #----- by stream_id across every category list they fetch, so reusing the
-    #----- same id makes the second category's copy look "already seen" and it
-    #----- never renders there (confirmed: server sends it, client drops it).
-    #----- Both ids resolve back to the same imdb_id at playback time.
+    #----- stream_id for the Estrenos placement. The Xtream Codes protocol has
+    #----- no "category_ids" (plural/array) field - a stream row only ever
+    #----- declares ONE category_id - and IPTV clients that build their menu by
+    #----- grouping the single unfiltered dump (instead of re-querying per
+    #----- category, confirmed via server logs) index VOD items by stream_id:
+    #----- reusing the same id for a second category makes that copy look
+    #----- "already seen" and it's silently dropped. Both ids resolve back to
+    #----- the same imdb_id at playback time, so it's still the same file.
+    estreno_movies = [m for m in movies if _is_estreno(m)]
     estreno_id_map = {}
-    if category_id == ESTRENOS_CATEGORY_ID:
+    if estreno_movies:
         estreno_id_map = await db.upsert_xtream_stream_ids_bulk(
-            [(m["imdb_id"], "movie", None, "estrenos") for m in movies if _is_estreno(m)]
+            [(m["imdb_id"], "movie", None, "estrenos") for m in estreno_movies]
         )
 
-    out = []
-    for m in movies:
-        imdb_id = m["imdb_id"]
-        primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
-        primary_id = _category_id("movie_genre", primary) if primary else None
-        cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
-        if _is_estreno(m):
-            cat_ids.append(ESTRENOS_CATEGORY_ID)
-        if category_id and category_id not in cat_ids:
-            continue
-        #----- Una sola entrada por titulo, SIEMPRE (filtrado o no) - el cliente
-        #----- arma su submenu de categorias con get_vod_categories, no escaneando
-        #----- este dump, asi que duplicar aca solo infla el catalogo sin razon.
-        cat = category_id or primary_id or ALL_MOVIES_CATEGORY_ID
-        sid = estreno_id_map[f"{imdb_id}:None:estrenos"] if cat == ESTRENOS_CATEGORY_ID else id_map[f"{imdb_id}:None:None"]
-        name = m.get("title") or "Untitled"
-        added = str(int(m.get("updated_on").timestamp())) if m.get("updated_on") else ""
-        out.append({
+    def _row(m: dict, cat: str, sid: int) -> dict:
+        return {
             "num": sid,
-            "name": name,
+            "name": m.get("title") or "Untitled",
             "stream_type": "movie",
             "stream_id": sid,
             "stream_icon": m.get("poster") or "",
             "rating": str(m.get("rating") or ""),
             "rating_5based": round((m.get("rating") or 0) / 2, 1),
-            "added": added,
+            "added": str(int(m["updated_on"].timestamp())) if m.get("updated_on") else "",
             "is_adult": "0",
             "category_id": cat,
             "container_extension": "mkv",
             "custom_sid": "",
             "direct_source": "",
             "_release_date": m.get("release_date") or "",
-        })
+        }
+
+    out = []
+    for m in movies:
+        imdb_id = m["imdb_id"]
+        primary = _effective_tag(overrides, _primary_movie_tag(m.get("genres") or []))
+        primary_id = _category_id("movie_genre", primary) if primary else None
+        is_estreno = _is_estreno(m)
+        cat_ids = [ALL_MOVIES_CATEGORY_ID] + ([primary_id] if primary_id else [])
+        if is_estreno:
+            cat_ids.append(ESTRENOS_CATEGORY_ID)
+        if category_id and category_id not in cat_ids:
+            continue
+
+        canonical_sid = id_map[f"{imdb_id}:None:None"]
+        if category_id == ESTRENOS_CATEGORY_ID:
+            #----- Explicit Estrenos-only request (client actually re-queried).
+            out.append(_row(m, ESTRENOS_CATEGORY_ID, estreno_id_map[f"{imdb_id}:None:estrenos"]))
+            continue
+        if category_id:
+            #----- Explicit genre/platform/manual-category request.
+            out.append(_row(m, category_id, canonical_sid))
+            continue
+
+        #----- Unfiltered dump: one row for its primary category (same as
+        #----- always), PLUS a second row for Estrenos if it qualifies - this
+        #----- is the only way a client that groups this single response
+        #----- client-side ever discovers the Estrenos entries at all.
+        out.append(_row(m, primary_id or ALL_MOVIES_CATEGORY_ID, canonical_sid))
+        if is_estreno:
+            out.append(_row(m, ESTRENOS_CATEGORY_ID, estreno_id_map[f"{imdb_id}:None:estrenos"]))
+
     if category_id == ESTRENOS_CATEGORY_ID:
         out.sort(key=lambda it: it["_release_date"], reverse=True)
     elif category_id and _sort_mode_for(overrides, "movie_genre", category_id) == "title_asc":
