@@ -293,7 +293,15 @@ def _build_category_list(overrides: dict, prefix: str, raw_tags: list) -> list:
     return ordered + unordered
 
 
+#----- Cached by category_id (same TTL as the catalog itself) so the
+#----- platform/trending/sort build below runs once per 30s window instead
+#----- of once per request - matters once the catalog is thousands of
+#----- titles and dozens of users hit this in the same TiviMate menu open.
 async def _list_vod_streams(category_id: str = None) -> list:
+    return await _cached(f"vod_streams:{category_id}", lambda: _build_vod_streams(category_id))
+
+
+async def _build_vod_streams(category_id: str = None) -> list:
     movies = [m for m in await _all_movies() if m.get("imdb_id")]
     overrides = await _category_overrides("movie")
     trending = await tmdb_provider.trending_ids("movie")
@@ -363,6 +371,10 @@ async def _list_vod_streams(category_id: str = None) -> list:
 
 
 async def _list_series(category_id: str = None) -> list:
+    return await _cached(f"series:{category_id}", lambda: _build_series(category_id))
+
+
+async def _build_series(category_id: str = None) -> list:
     shows = [s for s in await _all_tv_shows() if s.get("imdb_id")]
     overrides = await _category_overrides("series")
     trending = await tmdb_provider.trending_ids("tv")
