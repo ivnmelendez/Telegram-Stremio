@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -170,6 +171,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+#----- Catalog JSON (get_vod_streams/get_series) runs into the MBs at
+#----- thousands of titles - gzip cuts that 80-90% before it hits the wire,
+#----- same as any real Xtream panel behind nginx with gzip on.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 try:
     app.mount("/static", StaticFiles(directory="Backend/fastapi/static"), name="static")
