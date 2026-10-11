@@ -45,6 +45,13 @@ class Database:
 
         self.current_db_index = 1
 
+        #----- Keys already confirmed written to xtream_stream_map this process
+        #----- lifetime. The mapping is a pure deterministic hash (crc32 of
+        #----- imdb_id:season:episode) - once persisted it never needs rewriting,
+        #----- so repeat catalog requests skip the Mongo upsert entirely instead
+        #----- of re-writing the whole catalog on every player_api.php call.
+        self._upserted_stream_keys: set = set()
+
     async def connect(self):
         try:
             for index, uri in enumerate(self.db_uris):
@@ -2613,10 +2620,14 @@ class Database:
 
         ids = {}
         ops = []
+        new_keys = []
         for imdb_id, media_type, season_number, episode_number in items:
             key = f"{imdb_id}:{season_number}:{episode_number}"
             stream_id = zlib.crc32(key.encode()) & 0x7FFFFFFF
             ids[key] = stream_id
+            if key in self._upserted_stream_keys:
+                continue
+            new_keys.append(key)
             ops.append(UpdateOne(
                 {"_id": stream_id},
                 {"$set": {
@@ -2627,6 +2638,7 @@ class Database:
             ))
         if ops:
             await self.dbs["tracking"]["xtream_stream_map"].bulk_write(ops, ordered=False)
+            self._upserted_stream_keys.update(new_keys)
         return ids
 
     async def resolve_xtream_stream_id(self, stream_id: int) -> Optional[dict]:
