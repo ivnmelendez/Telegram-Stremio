@@ -433,7 +433,7 @@ _trending_cache: dict = {}
 
 
 async def trending_ids(media_type: str) -> list:
-    """Weekly trending tmdb_ids (top 40, pages 1-2), in TMDB's own rank order (most trending first)."""
+    """Weekly trending tmdb_ids (top 60, pages 1-3), in TMDB's own rank order (most trending first)."""
     now = time.time()
     cached = _trending_cache.get(media_type)
     if cached and now - cached[0] < _TRENDING_TTL:
@@ -442,7 +442,7 @@ async def trending_ids(media_type: str) -> list:
     try:
         ids = []
         async with API_SEMAPHORE:
-            for page in (1, 2):
+            for page in (1, 2, 3):
                 data = (
                     await client.trending().movie_weekly(page=page)
                     if media_type == "movie"
