@@ -2,7 +2,7 @@
 
 Anime  : Kitsu > TVDB > TMDB > Cinemeta
 Movies : TMDB > Cinemeta
-Series : TVDB > Cinemeta > TMDB
+Series : TMDB > TVDB > Cinemeta
 """
 from __future__ import annotations
 
@@ -148,19 +148,39 @@ async def resolve_series(
         except Exception as e:
             LOGGER.warning(f"Cinemeta explicit TV fetch failed [{imdb_id}]: {e}")
 
-    # 1) TVDB
+    # 1) TMDB - tried first so a show with a known/correct tmdb_id (or a clean
+    #    title+year search hit) never falls through to TVDB's fuzzy title match,
+    #    which can mismatch brand-new shows TVDB hasn't indexed yet.
+    try:
+        found_tmdb_id = tmdb_id
+        if not found_tmdb_id:
+            hit = await tmdb.safe_search(title, "tv", year)
+            if hit:
+                found_tmdb_id = hit.id
+        if found_tmdb_id:
+            tv = await tmdb.details("tv", found_tmdb_id)
+            ep = await tmdb.episode_details(found_tmdb_id, season, episode) if tv else None
+            if tv and ep:
+                LOGGER.info(f"[SERIES] TMDB hit for '{title}' S{season:02d}E{episode:02d}")
+                return await _enrich_series_networks(
+                    tmdb.build_tv_payload(tv, ep, season, episode, quality, encoded_string)
+                )
+    except Exception as e:
+        LOGGER.warning(f"[SERIES] TMDB error for '{title}': {e}")
+
+    # 2) TVDB
     try:
         result = await tvdb.fetch_series_metadata(
             title, season, episode, encoded_string, year=year, quality=quality
         )
         if result:
-            LOGGER.info(f"[SERIES] TVDB hit for '{title}' S{season:02d}E{episode:02d}")
+            LOGGER.info(f"[SERIES] TMDB miss for '{title}' -> TVDB hit S{season:02d}E{episode:02d}")
             return await _enrich_series_networks(result)
     except Exception as e:
         LOGGER.warning(f"[SERIES] TVDB error for '{title}': {e}")
 
-    # 2) Cinemeta
-    LOGGER.info(f"[SERIES] TVDB miss for '{title}' -> Cinemeta")
+    # 3) Cinemeta
+    LOGGER.info(f"[SERIES] TMDB/TVDB miss for '{title}' -> Cinemeta")
     if not imdb_id:
         imdb_id = await cinemeta.safe_search(title, "tvSeries", year)
     if imdb_id:
@@ -188,18 +208,6 @@ async def resolve_series(
                 )
         except Exception as e:
             LOGGER.warning(f"Cinemeta TV fetch failed [{title}]: {e}")
-
-    # 3) TMDB
-    LOGGER.info(f"[SERIES] Cinemeta miss for '{title}' -> TMDB")
-    if not tmdb_id:
-        hit = await tmdb.safe_search(title, "tv", year)
-        if hit:
-            tmdb_id = hit.id
-    if tmdb_id:
-        tv = await tmdb.details("tv", tmdb_id)
-        if tv:
-            ep = await tmdb.episode_details(tmdb_id, season, episode)
-            return tmdb.build_tv_payload(tv, ep, season, episode, quality, encoded_string)
 
     LOGGER.info(f"[SERIES] No metadata for '{title}' S{season:02d}E{episode:02d}")
     return None
