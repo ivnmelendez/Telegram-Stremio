@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from Backend import db
 from Backend.fastapi.routes.stremio_routes import get_resolution_priority, parse_size_to_bytes, stream_res_label
-from Backend.fastapi.security.tokens import verify_token
+from Backend.fastapi.security.tokens import annotate_token
 from Backend.helper.cf_stream import cf_enabled, cf_stream_url
 from Backend.helper.metadata.providers import tmdb as tmdb_provider
 from Backend.helper.passwords import verify_password
@@ -45,7 +45,7 @@ async def _authenticate(username: str, password: str):
     if not token_doc or not verify_password(password, token_doc.get("xtream_password_hash") or ""):
         return None, None
     token = token_doc.get("token")
-    token_data = await verify_token(token)
+    token_data = await annotate_token(token_doc)
     return token, token_data
 
 

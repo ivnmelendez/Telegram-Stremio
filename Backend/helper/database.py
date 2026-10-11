@@ -91,6 +91,13 @@ class Database:
                     [("items.tmdb_id", ASCENDING), ("items.media_type", ASCENDING)]
                 )
                 await tracking["family_users"].create_index([("username", ASCENDING)], unique=True)
+                #----- api_tokens had no index on either lookup field - every
+                #----- Xtream/WebDAV auth call (get_api_token, get_token_by_
+                #----- xtream_username) was a full collection scan.
+                await tracking["api_tokens"].create_index([("token", ASCENDING)], unique=True)
+                await tracking["api_tokens"].create_index(
+                    [("xtream_username", ASCENDING)], unique=True, sparse=True
+                )
                 await tracking["xtream_categories"].create_index(
                     [("key", ASCENDING), ("media_type", ASCENDING)], unique=True
                 )
