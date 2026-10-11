@@ -173,8 +173,20 @@ app.add_middleware(
 )
 #----- Catalog JSON (get_vod_streams/get_series) runs into the MBs at
 #----- thousands of titles - gzip cuts that 80-90% before it hits the wire,
-#----- same as any real Xtream panel behind nginx with gzip on.
+#----- same as any real Xtream panel behind nginx with gzip on. Streaming
+#----- routes are excluded: the video is already compressed, and gzipping
+#----- every chunk adds CPU overhead that stalls playback start.
 app.add_middleware(GZipMiddleware, minimum_size=500)
+_STREAM_PATH_PREFIXES = ("/dl/", "/movie/", "/series/")
+
+
+@app.middleware("http")
+async def _skip_gzip_for_streams(request: Request, call_next):
+    if request.url.path.startswith(_STREAM_PATH_PREFIXES):
+        request.scope["headers"] = [
+            (k, v) for k, v in request.scope["headers"] if k != b"accept-encoding"
+        ]
+    return await call_next(request)
 
 try:
     app.mount("/static", StaticFiles(directory="Backend/fastapi/static"), name="static")
