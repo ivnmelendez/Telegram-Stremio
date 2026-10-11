@@ -1149,6 +1149,54 @@ class Database:
                 return doc, f"storage_{db_index}", db_index
         return None, None, None
 
+    #----- Already-catalogued series by fuzzy title, used before a fresh
+    #----- per-episode metadata search so a show that was already rescanned
+    #----- to the correct tmdb_id keeps matching that id instead of each new
+    #----- episode re-running an independent fuzzy TVDB search that can
+    #----- mismatch to a different show.
+    async def find_existing_tv_tmdb_id(self, title: str, year=None) -> Optional[int]:
+        from Backend.helper.metadata.common import title_similarity
+
+        title = (title or "").strip()
+        if not title:
+            return None
+
+        words = [re.escape(w) for w in title.split() if w]
+        if not words:
+            return None
+        regex_query = {"$regex": ".*" + ".*".join(words) + ".*", "$options": "i"}
+        match = {"$or": [
+            {"title": regex_query},
+            {"title_english": regex_query},
+            {"original_title": regex_query},
+        ]}
+        projection = {
+            "tmdb_id": 1, "title": 1, "title_english": 1,
+            "original_title": 1, "release_year": 1,
+        }
+
+        best_doc = None
+        best_sim = 0.0
+        for db_index in range(1, len(self.dbs)):
+            col = self.dbs[f"storage_{db_index}"]["tv"]
+            async for doc in col.find(match, projection):
+                for candidate in (doc.get("title"), doc.get("title_english"), doc.get("original_title")):
+                    if not candidate:
+                        continue
+                    sim = title_similarity(title, candidate)
+                    if sim > best_sim:
+                        best_sim = sim
+                        best_doc = doc
+
+        if not best_doc or best_sim < 0.80:
+            return None
+        if year and best_doc.get("release_year"):
+            try:
+                if abs(int(best_doc["release_year"]) - int(year)) > 1:
+                    return None
+            except (TypeError, ValueError):
+                pass
+        return best_doc.get("tmdb_id")
 
     #-----
     #----- Multi Database Method for insert/update/delete/list

@@ -187,9 +187,18 @@ async def metadata(
                     year=year, quality=quality, absolute=absolute,
                 )
             if result is None and not absolute:
+                series_default_id = default_id
+                if not series_default_id:
+                    try:
+                        existing_tmdb_id = await Backend.db.find_existing_tv_tmdb_id(title, year)
+                    except Exception as e:
+                        existing_tmdb_id = None
+                        LOGGER.debug(f"[SERIES] existing tmdb_id lookup failed for '{title}': {e}")
+                    if existing_tmdb_id:
+                        series_default_id = str(existing_tmdb_id)
                 result = await resolve_series(
                     title, int(season), int(episode), encoded_string,
-                    year=year, quality=quality, default_id=default_id,
+                    year=year, quality=quality, default_id=series_default_id,
                 )
             # Absolute on non-anime channel: still try series with season 1
             if result is None and absolute:
