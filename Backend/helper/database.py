@@ -2421,6 +2421,14 @@ class Database:
         )
         return result.modified_count > 0 or result.matched_count > 0
 
+    #----- Free-text record of a third-party provider account handed to this user -
+    #----- purely informational for the admin, never read by the streaming path.
+    async def set_token_provider_info(self, token: str, provider: dict) -> bool:
+        result = await self.dbs["tracking"]["api_tokens"].update_one(
+            {"token": token}, {"$set": {"external_provider": provider}}
+        )
+        return result.modified_count > 0 or result.matched_count > 0
+
     async def link_token_user(self, token: str, user_id: int, name: str = None) -> bool:
         #----- Link an existing token to a Telegram user_id; elevate to admin when
         #----- the linked user is the configured owner. Optionally overwrite the name.

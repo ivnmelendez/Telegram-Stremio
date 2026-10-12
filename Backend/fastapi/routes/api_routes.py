@@ -450,6 +450,22 @@ async def update_token_limits_api(token: str, payload: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+#----- Free-text note on a third-party provider account given to this user - for
+#----- the admin's own tracking only, never read by the streaming/Worker path.
+async def set_token_provider_api(token: str, payload: dict):
+    try:
+        provider = {
+            "provider_name": (payload.get("provider_name") or "").strip(),
+            "host": (payload.get("host") or "").strip(),
+            "username": (payload.get("username") or "").strip(),
+            "password": (payload.get("password") or "").strip(),
+        }
+        await db.set_token_provider_info(token, provider)
+        return {"message": "Provider info saved"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 #----- Speed test
 #----- Decode a quality_id into (chat_id, msg_id); split files use the first part
 async def _resolve_speed_test_target(quality_id: str):
@@ -897,6 +913,7 @@ async def get_all_tokens_api() -> dict:
                 "max_concurrent_streams": token_doc.get("max_concurrent_streams") or 0,
                 "daily_bytes": (usage.get("daily") or {}).get("bytes", 0),
                 "monthly_bytes": (usage.get("monthly") or {}).get("bytes", 0),
+                "external_provider": token_doc.get("external_provider") or {},
                 "addon_url": (
                     f"{SettingsManager.current().base_url}/stremio/{token_str}/manifest.json"
                     if token_str else None

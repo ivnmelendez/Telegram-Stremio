@@ -120,6 +120,7 @@ from Backend.fastapi.routes.api_routes import (
     update_settings_api,
     update_subscription_plan_api,
     update_token_limits_api,
+    set_token_provider_api,
     list_family_users_api,
     update_family_user_api,
     list_xtream_categories_api,
@@ -395,6 +396,10 @@ async def create_token(payload: dict, _: bool = Depends(require_auth)):
 @app.put("/api/tokens/{token}")
 async def update_token(token: str, payload: dict, _: bool = Depends(require_auth)):
     return await update_token_limits_api(token, payload)
+
+@app.put("/api/tokens/{token}/provider")
+async def update_token_provider(token: str, payload: dict, _: bool = Depends(require_auth)):
+    return await set_token_provider_api(token, payload)
 
 @app.delete("/api/tokens/{token}")
 async def revoke_token(token: str, _: bool = Depends(require_auth)):
