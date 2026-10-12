@@ -450,8 +450,8 @@ async def update_token_limits_api(token: str, payload: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-#----- Free-text note on a third-party provider account given to this user - for
-#----- the admin's own tracking only, never read by the streaming/Worker path.
+#----- Third-party IPTV provider account given to this user. Read by the Xtream
+#----- facade only to 302 live TV requests to the provider (never fetched here).
 async def set_token_provider_api(token: str, payload: dict):
     try:
         provider = {

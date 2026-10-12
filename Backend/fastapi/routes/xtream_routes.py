@@ -1,7 +1,7 @@
 import time
 import zlib
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -47,6 +47,32 @@ async def _authenticate(username: str, password: str):
     token = token_doc.get("token")
     token_data = await annotate_token(token_doc)
     return token, token_data
+
+
+#----- Per-user external IPTV provider (set in the access panel). Live TV is never
+#----- fetched by this server: every live request is answered with a 302 to the
+#----- provider so the client's own IP talks to it, not the VPS.
+_LIVE_ACTIONS = ("get_live_categories", "get_live_streams", "get_short_epg", "get_simple_data_table")
+
+
+def _external_provider(token_data: dict):
+    ext = (token_data or {}).get("external_provider") or {}
+    host = (ext.get("host") or "").strip().rstrip("/")
+    user = (ext.get("username") or "").strip()
+    pwd = (ext.get("password") or "").strip()
+    if not (host and user and pwd):
+        return None
+    if "://" not in host:
+        host = "http://" + host
+    return host, user, pwd
+
+
+def _provider_api_url(provider: tuple, params: dict) -> str:
+    host, user, pwd = provider
+    query = {k: v for k, v in params.items() if k not in ("username", "password")}
+    query["username"] = user
+    query["password"] = pwd
+    return f"{host}/player_api.php?{urlencode(query)}"
 
 
 def _server_info() -> dict:
@@ -589,7 +615,10 @@ async def player_api(request: Request):
             cats.append({"category_id": TRENDING_CATEGORY_ID, "category_name": "En tendencia", "parent_id": 0})
         cats += _build_category_list(overrides, "series_tag", _ordered_platforms(platforms))
         return cats
-    if action in ("get_live_categories", "get_live_streams"):
+    if action in _LIVE_ACTIONS:
+        provider = _external_provider(token_data)
+        if provider:
+            return RedirectResponse(_provider_api_url(provider, params), status_code=302)
         return []
     if action == "get_vod_streams":
         return await _list_vod_streams(params.get("category_id"))
@@ -655,3 +684,31 @@ async def xtream_episode(username: str, password: str, episode_id: int, ext: str
         raise HTTPException(status_code=404, detail="No playable file for this episode")
 
     return RedirectResponse(_dl_redirect_url(token, quality["id"]), status_code=302)
+
+
+@router.get("/live/{username}/{password}/{stream_id}.{ext}")
+async def xtream_live(username: str, password: str, stream_id: str, ext: str):
+    token, token_data = await _authenticate(username, password)
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid Xtream credentials")
+
+    provider = _external_provider(token_data)
+    if not provider:
+        raise HTTPException(status_code=404, detail="No live provider assigned")
+
+    host, user, pwd = provider
+    return RedirectResponse(f"{host}/live/{user}/{pwd}/{stream_id}.{ext}", status_code=302)
+
+
+@router.get("/xmltv.php")
+async def xtream_xmltv(username: str = "", password: str = ""):
+    token, token_data = await _authenticate(username, password)
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid Xtream credentials")
+
+    provider = _external_provider(token_data)
+    if not provider:
+        raise HTTPException(status_code=404, detail="No live provider assigned")
+
+    host, user, pwd = provider
+    return RedirectResponse(f"{host}/xmltv.php?{urlencode({'username': user, 'password': pwd})}", status_code=302)

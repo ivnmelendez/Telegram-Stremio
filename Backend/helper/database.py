@@ -2421,8 +2421,8 @@ class Database:
         )
         return result.modified_count > 0 or result.matched_count > 0
 
-    #----- Free-text record of a third-party provider account handed to this user -
-    #----- purely informational for the admin, never read by the streaming path.
+    #----- Third-party IPTV provider account handed to this user; the Xtream facade
+    #----- redirects live TV requests to it.
     async def set_token_provider_info(self, token: str, provider: dict) -> bool:
         result = await self.dbs["tracking"]["api_tokens"].update_one(
             {"token": token}, {"$set": {"external_provider": provider}}
