@@ -208,6 +208,7 @@ _PLATFORM_DISPLAY = {
     "Peacock": "🟨 Peacock",
     "MGM+": "🔶 MGM+",
     "Universal+": "🟣 Universal+",
+    "Crunchyroll": "🟠 Crunchyroll",
 }
 
 
