@@ -1,3 +1,4 @@
+import asyncio
 import re
 import secrets
 import string
@@ -1727,6 +1728,23 @@ class Database:
             if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
                 return await self._handle_storage_error(self.update_tv_show, tv_show_data, total_storage_dbs=total_storage_dbs)
     
+    #----- Cheap change-detector for the catalog: per storage db and per movie/tv
+    #----- collection, the newest updated_on plus the doc count. Any insert, edit
+    #----- (they all stamp updated_on) or delete changes at least one of the two.
+    async def catalog_fingerprint(self) -> tuple:
+        async def _one(db_key: str, coll: str):
+            collection = self.dbs[db_key][coll]
+            latest = await collection.find_one({}, {"updated_on": 1}, sort=[("updated_on", -1)])
+            count = await collection.estimated_document_count()
+            return (latest.get("updated_on") if latest else None, count)
+
+        tasks = [
+            _one(f"storage_{i}", coll)
+            for i in range(1, self.current_db_index + 1)
+            for coll in ("movie", "tv")
+        ]
+        return tuple(await asyncio.gather(*tasks))
+
     async def sort_movies(self, sort_params, page, page_size, genre_filter=None, extra_filter=None):
         sort_dict = self._get_sort_dict(sort_params)
         filter_dict = {"genres": {"$in": [genre_filter]}} if genre_filter else {}

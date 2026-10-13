@@ -1,3 +1,4 @@
+import asyncio
 import time
 import zlib
 from datetime import datetime
@@ -20,18 +21,58 @@ CATALOG_SIZE = 5000  #----- effectively "all of it" for a personal catalog
 
 #----- A single TiviMate menu open fires several player_api actions back-to-back
 #----- (categories, then streams for each). Without this, each one re-sorts the
-#----- whole catalog from Mongo. Short TTL: fresh enough, cuts the repeat queries.
-_CATALOG_CACHE_TTL = 30
+#----- whole catalog from Mongo. Entries live up to _CATALOG_MAX_TTL, but a cheap
+#----- fingerprint of the movie/tv collections (latest updated_on + doc count) is
+#----- checked every _FINGERPRINT_INTERVAL: when it changes, the whole cache is
+#----- dropped. Rebuilds are spaced >= _REBUILD_MIN_GAP apart so a multi-part
+#----- upload (many writes in a row) doesn't trigger a rebuild per write.
+_CATALOG_MAX_TTL = 600
+_FINGERPRINT_INTERVAL = 15
+_REBUILD_MIN_GAP = 60
 _catalog_cache: dict = {}
+_catalog_state = {"fp": None, "checked": 0.0, "bumped": 0.0, "gen": 0}
+_catalog_lock = asyncio.Lock()
+
+
+async def _catalog_generation() -> int:
+    now = time.time()
+    if now - _catalog_state["checked"] < _FINGERPRINT_INTERVAL:
+        return _catalog_state["gen"]
+    async with _catalog_lock:
+        now = time.time()
+        if now - _catalog_state["checked"] < _FINGERPRINT_INTERVAL:
+            return _catalog_state["gen"]
+        try:
+            fp = await db.catalog_fingerprint()
+        except Exception:
+            #----- Mongo hiccup: keep serving cache, bounded by _CATALOG_MAX_TTL
+            _catalog_state["checked"] = now
+            return _catalog_state["gen"]
+        _catalog_state["checked"] = now
+        if fp != _catalog_state["fp"]:
+            if _catalog_state["fp"] is None:
+                _catalog_state["fp"] = fp
+            elif now - _catalog_state["bumped"] >= _REBUILD_MIN_GAP:
+                _catalog_state["fp"] = fp
+                _catalog_state["gen"] += 1
+                _catalog_state["bumped"] = now
+            #----- else: too soon after the last rebuild, retry on the next check
+    return _catalog_state["gen"]
+
+
+#----- Drop everything now (e.g. admin edited category overrides)
+def invalidate_catalog_cache() -> None:
+    _catalog_cache.clear()
 
 
 async def _cached(key: str, loader) -> list:
+    gen = await _catalog_generation()
     now = time.time()
     cached = _catalog_cache.get(key)
-    if cached and now - cached[0] < _CATALOG_CACHE_TTL:
+    if cached and cached[2] == gen and now - cached[0] < _CATALOG_MAX_TTL:
         return cached[1]
     data = await loader()
-    _catalog_cache[key] = (now, data)
+    _catalog_cache[key] = (now, data, gen)
     return data
 
 

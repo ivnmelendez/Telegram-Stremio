@@ -3143,7 +3143,7 @@ async def create_xtream_category_api(payload: dict) -> dict:
         key = f"{base_key}-{n}"
         n += 1
 
-    return await db.upsert_xtream_category(
+    result = await db.upsert_xtream_category(
         key, media_type,
         origin="manual",
         display_name=display_name,
@@ -3151,6 +3151,8 @@ async def create_xtream_category_api(payload: dict) -> dict:
         sort=payload.get("sort") or "newest",
         order=payload.get("order"),
     )
+    xtream_routes.invalidate_catalog_cache()
+    return result
 
 
 async def update_xtream_category_api(key: str, media_type: str, payload: dict) -> dict:
@@ -3167,11 +3169,14 @@ async def update_xtream_category_api(key: str, media_type: str, payload: dict) -
         fields["sort"] = payload.get("sort") or "newest"
     if "tags" in payload:
         fields["tags"] = [t for t in (payload.get("tags") or []) if t]
-    return await db.upsert_xtream_category(key, media_type, **fields)
+    result = await db.upsert_xtream_category(key, media_type, **fields)
+    xtream_routes.invalidate_catalog_cache()
+    return result
 
 
 async def delete_xtream_category_api(key: str, media_type: str) -> dict:
     ok = await db.delete_xtream_category(key, media_type)
     if not ok:
         raise HTTPException(status_code=404, detail="category not found")
+    xtream_routes.invalidate_catalog_cache()
     return {"status": "success", "message": "Category override removed."}
