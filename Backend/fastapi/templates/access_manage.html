@@ -264,6 +264,16 @@
                     <option value="3">3</option>
                 </select>
             </div>
+            <div class="grid grid-cols-2 gap-3">
+                <div class="modal-field">
+                    <label>Xtream Username <span class="text-soft text-xs">(optional)</span></label>
+                    <input type="text" id="create-xtream-user" placeholder="auto" autocomplete="off" class="glass-input">
+                </div>
+                <div class="modal-field">
+                    <label>Xtream Password <span class="text-soft text-xs">(optional)</span></label>
+                    <input type="text" id="create-xtream-pass" placeholder="auto" autocomplete="off" class="glass-input">
+                </div>
+            </div>
             <label class="flex items-center gap-3 text-sm section-title cursor-pointer">
                 <input type="checkbox" id="create-lifetime" class="w-4 h-4" checked>
                 Never expires <span class="text-soft text-xs">(no expiry date; works even when subscription mode is ON)</span>
@@ -356,18 +366,19 @@
         <div class="flex items-start justify-between gap-4 mb-5">
             <div>
                 <h3 class="text-xl font-bold section-title">Xtream Codes Login (TiviMate)</h3>
-                <p class="text-sm text-soft mt-1" id="xtream-warning">Save the password now — it won't be shown again.</p>
+                <p class="text-sm text-soft mt-1" id="xtream-warning"></p>
             </div>
             <button onclick="closeModal('xtream-modal')" class="glass-btn rounded-full w-10 h-10 flex items-center justify-center"><i class="fas fa-xmark"></i></button>
         </div>
         <div class="space-y-3 text-sm">
             <div class="modal-field"><label>Host</label><input type="text" id="xtream-host" readonly class="glass-input"></div>
             <div class="modal-field"><label>Port</label><input type="text" id="xtream-port" readonly class="glass-input"></div>
-            <div class="modal-field"><label>Username</label><input type="text" id="xtream-username" readonly class="glass-input"></div>
-            <div class="modal-field"><label>Password</label><input type="text" id="xtream-password" readonly class="glass-input"></div>
+            <div class="modal-field"><label>Username</label><input type="text" id="xtream-username" autocomplete="off" class="glass-input"></div>
+            <div class="modal-field"><label>Password</label><input type="text" id="xtream-password" autocomplete="off" placeholder="type new password" class="glass-input"></div>
         </div>
         <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-6">
-            <button onclick="closeModal('xtream-modal')" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">Close</button>
+            <button onclick="closeModal('xtream-modal')" class="glass-btn rounded-2xl px-5 py-3 text-sm font-bold">Close</button>
+            <button onclick="saveXtreamCreds()" class="glass-btn glass-btn-primary rounded-2xl px-5 py-3 text-sm font-bold">Save</button>
         </div>
     </div>
 </div>
@@ -665,6 +676,8 @@
         document.getElementById('create-monthly').value = 0;
         document.getElementById('create-concurrent').value = 0;
         document.getElementById('create-lifetime').checked = true;
+        document.getElementById('create-xtream-user').value = '';
+        document.getElementById('create-xtream-pass').value = '';
         openModal('create-modal');
     }
 
@@ -677,6 +690,8 @@
             monthly_limit_gb: Number(document.getElementById('create-monthly').value || 0),
             max_concurrent_streams: Number(document.getElementById('create-concurrent').value || 0),
             subscription_exempt: document.getElementById('create-lifetime').checked,
+            xtream_username: document.getElementById('create-xtream-user').value.trim(),
+            xtream_password: document.getElementById('create-xtream-pass').value.trim(),
         };
         try {
             const resp = await fetch('/api/tokens', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -732,23 +747,45 @@
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
     }
 
+    let xtreamToken = null;
+
+    function fillXtreamModal(d) {
+        document.getElementById('xtream-host').value = d.host || '';
+        document.getElementById('xtream-port').value = d.port || '';
+        document.getElementById('xtream-username').value = d.username || '';
+        const pass = document.getElementById('xtream-password');
+        const warn = document.getElementById('xtream-warning');
+        if (d.password) {
+            pass.value = d.password;
+            warn.textContent = 'Edit username/password and press Save to change them.';
+        } else {
+            pass.value = '';
+            warn.textContent = 'Old password cannot be recovered. Type a new one and press Save to set it (then it will stay visible).';
+        }
+    }
+
     async function showXtreamCreds(token) {
+        xtreamToken = token;
         try {
             const resp = await fetch('/api/tokens/' + encodeURIComponent(token) + '/xtream', { method: 'POST' });
             if (!resp.ok) { showToast('Failed to get Xtream credentials.', 'error', 'Failed'); return; }
-            const d = await resp.json();
-            document.getElementById('xtream-host').value = d.host || '';
-            document.getElementById('xtream-port').value = d.port || '';
-            document.getElementById('xtream-username').value = d.username || '';
-            const warn = document.getElementById('xtream-warning');
-            if (d.password) {
-                document.getElementById('xtream-password').value = d.password;
-                warn.textContent = "Save the password now — it won't be shown again.";
-            } else {
-                document.getElementById('xtream-password').value = '(already set — only shown once, at creation)';
-                warn.textContent = 'This account already has Xtream credentials.';
-            }
+            fillXtreamModal(await resp.json());
             openModal('xtream-modal');
+        } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
+    }
+
+    async function saveXtreamCreds() {
+        const payload = {
+            username: document.getElementById('xtream-username').value.trim(),
+            password: document.getElementById('xtream-password').value.trim(),
+        };
+        try {
+            const resp = await fetch('/api/tokens/' + encodeURIComponent(xtreamToken) + '/xtream', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const d = await resp.json();
+            if (!resp.ok) { showToast(d.detail || 'Failed to save Xtream credentials.', 'error', 'Failed'); return; }
+            fillXtreamModal(d);
+            if (payload.password) document.getElementById('xtream-password').value = payload.password;
+            showToast('Xtream credentials saved.', 'success', 'Updated');
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
     }
 

@@ -49,6 +49,7 @@ from Backend.fastapi.routes.api_routes import (
     get_all_subscribers_api,
     get_all_tokens_api,
     get_xtream_credentials_api,
+    set_xtream_credentials_api,
     get_auto_catalog_settings_api,
     get_catalog_order_api,
     update_catalog_order_api,
@@ -408,6 +409,10 @@ async def revoke_token(token: str, _: bool = Depends(require_auth)):
 @app.post("/api/tokens/{token}/xtream")
 async def get_xtream_credentials(token: str, _: bool = Depends(require_auth)):
     return await get_xtream_credentials_api(token)
+
+@app.put("/api/tokens/{token}/xtream")
+async def put_xtream_credentials(token: str, payload: dict, _: bool = Depends(require_auth)):
+    return await set_xtream_credentials_api(token, payload)
 
 @app.get("/api/family-users")
 async def list_family_users(_: bool = Depends(require_auth)):

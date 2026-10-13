@@ -2591,20 +2591,63 @@ class Database:
     #----- only its hash is stored, same pattern as admin_password.
     async def get_or_create_xtream_credentials(self, token: str) -> Optional[Tuple[str, Optional[str]]]:
         coll = self.dbs["tracking"]["api_tokens"]
-        doc = await coll.find_one({"token": token}, {"xtream_username": 1})
+        doc = await coll.find_one({"token": token}, {"xtream_username": 1, "xtream_password": 1})
         if not doc:
             return None
         if doc.get("xtream_username"):
-            return doc["xtream_username"], None
+            return doc["xtream_username"], doc.get("xtream_password")
 
         alphabet = string.ascii_lowercase + string.digits
         username = "nl" + ''.join(secrets.choice(alphabet) for _ in range(8))
         password = ''.join(secrets.choice(alphabet) for _ in range(10))
         await coll.update_one(
             {"token": token},
-            {"$set": {"xtream_username": username, "xtream_password_hash": hash_password(password)}},
+            {"$set": {"xtream_username": username, "xtream_password": password, "xtream_password_hash": hash_password(password)}},
         )
         return username, password
+
+    #----- Set custom Xtream username/password for a token. Blank username keeps the
+    #----- current/generated one; blank password keeps the current hash (or generates
+    #----- one if none exists yet). Returns (username, plaintext_password_or_None), or
+    #----- None if token not found. Raises ValueError on invalid/duplicate input.
+    async def set_xtream_credentials(self, token: str, username: Optional[str], password: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
+        coll = self.dbs["tracking"]["api_tokens"]
+        doc = await coll.find_one({"token": token}, {"xtream_username": 1, "xtream_password_hash": 1, "xtream_password": 1})
+        if not doc:
+            return None
+
+        username = (username or "").strip()
+        password = (password or "").strip()
+        if username and not re.fullmatch(r"[A-Za-z0-9._-]{3,32}", username):
+            raise ValueError("Username: 3-32 chars, only letters, digits, . _ -")
+        if password and not re.fullmatch(r"[A-Za-z0-9._-]{4,64}", password):
+            raise ValueError("Password: 4-64 chars, only letters, digits, . _ -")
+
+        alphabet = string.ascii_lowercase + string.digits
+        final_user = username or doc.get("xtream_username") or "nl" + ''.join(secrets.choice(alphabet) for _ in range(8))
+        updates = {"xtream_username": final_user}
+        shown_password = None
+        if password:
+            updates["xtream_password_hash"] = hash_password(password)
+            updates["xtream_password"] = password
+            shown_password = password
+        elif not doc.get("xtream_password_hash"):
+            shown_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+            updates["xtream_password_hash"] = hash_password(shown_password)
+            updates["xtream_password"] = shown_password
+        else:
+            shown_password = doc.get("xtream_password")
+
+        taken = await coll.find_one({"xtream_username": final_user, "token": {"$ne": token}}, {"_id": 1})
+        if taken:
+            raise ValueError("That Xtream username is already in use.")
+        try:
+            await coll.update_one({"token": token}, {"$set": updates})
+        except Exception as e:
+            if "duplicate key" in str(e).lower() or "E11000" in str(e):
+                raise ValueError("That Xtream username is already in use.")
+            raise
+        return final_user, shown_password
 
     async def get_token_by_xtream_username(self, username: str) -> Optional[dict]:
         doc = await self.dbs["tracking"]["api_tokens"].find_one({"xtream_username": username})

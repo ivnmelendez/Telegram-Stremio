@@ -372,6 +372,16 @@ async def create_token_api(payload: dict):
             subscription_exempt=bool(payload.get("subscription_exempt")),
             max_concurrent_streams=_parse_concurrency(payload.get("max_concurrent_streams")),
         )
+        #----- Optional custom Xtream login chosen at creation time
+        xt_user = (payload.get("xtream_username") or "").strip()
+        xt_pass = (payload.get("xtream_password") or "").strip()
+        if xt_user or xt_pass:
+            try:
+                await db.set_xtream_credentials(new_token["token"], xt_user, xt_pass)
+            except ValueError as e:
+                #----- Token is already created; drop it so the admin can retry cleanly
+                await db.revoke_api_token(new_token["token"])
+                raise HTTPException(status_code=400, detail=str(e))
         return new_token
     except HTTPException:
         raise
@@ -963,6 +973,24 @@ async def get_xtream_credentials_api(token: str) -> dict:
     return {
         "username": username,
         "password": password,  #----- None if it already existed
+        "host": parsed.hostname or "",
+        "port": str(parsed.port or (443 if parsed.scheme == "https" else 80)),
+    }
+
+
+#----- Edit Xtream login (custom username and/or password) for a token
+async def set_xtream_credentials_api(token: str, payload: dict) -> dict:
+    try:
+        creds = await db.set_xtream_credentials(token, payload.get("username"), payload.get("password"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not creds:
+        raise HTTPException(status_code=404, detail="Token not found.")
+    username, password = creds
+    parsed = urlparse(SettingsManager.current().base_url or "")
+    return {
+        "username": username,
+        "password": password,
         "host": parsed.hostname or "",
         "port": str(parsed.port or (443 if parsed.scheme == "https" else 80)),
     }
