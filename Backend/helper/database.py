@@ -2,7 +2,6 @@ import asyncio
 import re
 import secrets
 import string
-import zlib
 from asyncio import create_task
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,7 +14,6 @@ from pymongo import ASCENDING, DESCENDING
 from Backend.config import Telegram
 from Backend.helper.encrypt import decode_string, encode_string
 from Backend.helper.modal import Episode, MovieSchema, QualityDetail, QualityPart, Season, TVShowSchema
-from Backend.helper.passwords import hash_password, verify_password
 from Backend.helper.settings_manager import SettingsManager
 from Backend.helper.task_manager import delete_message
 from Backend.logger import LOGGER
@@ -45,13 +43,6 @@ class Database:
         self.dbs: Dict[str, motor.motor_asyncio.AsyncIOMotorDatabase] = {}
 
         self.current_db_index = 1
-
-        #----- Keys already confirmed written to xtream_stream_map this process
-        #----- lifetime. The mapping is a pure deterministic hash (crc32 of
-        #----- imdb_id:season:episode) - once persisted it never needs rewriting,
-        #----- so repeat catalog requests skip the Mongo upsert entirely instead
-        #----- of re-writing the whole catalog on every player_api.php call.
-        self._upserted_stream_keys: set = set()
 
     async def connect(self):
         try:
@@ -91,17 +82,9 @@ class Database:
                 await tracking["custom_catalogs"].create_index(
                     [("items.tmdb_id", ASCENDING), ("items.media_type", ASCENDING)]
                 )
-                await tracking["family_users"].create_index([("username", ASCENDING)], unique=True)
-                #----- api_tokens had no index on either lookup field - every
-                #----- Xtream/WebDAV auth call (get_api_token, get_token_by_
-                #----- xtream_username) was a full collection scan.
+                #----- api_tokens had no index on its lookup field - every
+                #----- WebDAV auth call (get_api_token) was a full collection scan.
                 await tracking["api_tokens"].create_index([("token", ASCENDING)], unique=True)
-                await tracking["api_tokens"].create_index(
-                    [("xtream_username", ASCENDING)], unique=True, sparse=True
-                )
-                await tracking["xtream_categories"].create_index(
-                    [("key", ASCENDING), ("media_type", ASCENDING)], unique=True
-                )
                 await self._ensure_subtitle_indexes(tracking)
             except Exception as e:
                 LOGGER.error(f"Failed creating tracking indexes: {e}")
@@ -1728,23 +1711,6 @@ class Database:
             if any(keyword in str(e).lower() for keyword in ["storage", "quota"]):
                 return await self._handle_storage_error(self.update_tv_show, tv_show_data, total_storage_dbs=total_storage_dbs)
     
-    #----- Cheap change-detector for the catalog: per storage db and per movie/tv
-    #----- collection, the newest updated_on plus the doc count. Any insert, edit
-    #----- (they all stamp updated_on) or delete changes at least one of the two.
-    async def catalog_fingerprint(self) -> tuple:
-        async def _one(db_key: str, coll: str):
-            collection = self.dbs[db_key][coll]
-            latest = await collection.find_one({}, {"updated_on": 1}, sort=[("updated_on", -1)])
-            count = await collection.estimated_document_count()
-            return (latest.get("updated_on") if latest else None, count)
-
-        tasks = [
-            _one(f"storage_{i}", coll)
-            for i in range(1, self.current_db_index + 1)
-            for coll in ("movie", "tv")
-        ]
-        return tuple(await asyncio.gather(*tasks))
-
     async def sort_movies(self, sort_params, page, page_size, genre_filter=None, extra_filter=None):
         sort_dict = self._get_sort_dict(sort_params)
         filter_dict = {"genres": {"$in": [genre_filter]}} if genre_filter else {}
@@ -2439,14 +2405,6 @@ class Database:
         )
         return result.modified_count > 0 or result.matched_count > 0
 
-    #----- Third-party IPTV provider account handed to this user; the Xtream facade
-    #----- redirects live TV requests to it.
-    async def set_token_provider_info(self, token: str, provider: dict) -> bool:
-        result = await self.dbs["tracking"]["api_tokens"].update_one(
-            {"token": token}, {"$set": {"external_provider": provider}}
-        )
-        return result.modified_count > 0 or result.matched_count > 0
-
     async def link_token_user(self, token: str, user_id: int, name: str = None) -> bool:
         #----- Link an existing token to a Telegram user_id; elevate to admin when
         #----- the linked user is the configured owner. Optionally overwrite the name.
@@ -2517,209 +2475,6 @@ class Database:
             {"$set": {"max_concurrent_streams": max_concurrent_streams if max_concurrent_streams else None}}
         )
         return result.modified_count > 0
-
-    #-----
-    #----- Family / Friend Login Users
-    #-----
-
-    #----- Login accounts shared with family/friends: each links to an existing
-    #----- api_tokens.token (reuses the already-generated manifest) and optionally
-    #----- carries manually-entered Xtream Codes creds for a THIRD-PARTY provider
-    #----- (not our own Xtream facade above).
-    async def create_family_user(self, username: str, password_hash: str, api_token: str, xtream: Optional[dict] = None) -> Optional[dict]:
-        existing = await self.dbs["tracking"]["family_users"].find_one({"username": username})
-        if existing:
-            return None
-        doc = {
-            "username": username,
-            "password_hash": password_hash,
-            "api_token": api_token,
-            "xtream": xtream,
-            "is_active": True,
-            "created_at": datetime.utcnow(),
-        }
-        await self.dbs["tracking"]["family_users"].insert_one(doc)
-        return convert_objectid_to_str(doc)
-
-    async def get_family_user_by_username(self, username: str) -> Optional[dict]:
-        doc = await self.dbs["tracking"]["family_users"].find_one({"username": username})
-        return convert_objectid_to_str(doc) if doc else None
-
-    async def list_family_users(self) -> List[dict]:
-        cursor = self.dbs["tracking"]["family_users"].find().sort("created_at", DESCENDING)
-        docs = await cursor.to_list(None)
-        return [convert_objectid_to_str(doc) for doc in docs]
-
-    async def update_family_user(self, username: str, updates: dict) -> bool:
-        updates = {k: v for k, v in updates.items() if v is not None or k == "xtream"}
-        if not updates:
-            return False
-        result = await self.dbs["tracking"]["family_users"].update_one(
-            {"username": username}, {"$set": updates}
-        )
-        return result.modified_count > 0 or result.matched_count > 0
-
-    async def delete_family_user(self, username: str) -> bool:
-        result = await self.dbs["tracking"]["family_users"].delete_one({"username": username})
-        return result.deleted_count > 0
-
-    #-----
-    #----- Xtream category overrides (admin control over the auto-computed
-    #----- genre/platform categories exposed by the Xtream Codes API)
-    #-----
-    async def list_xtream_categories(self, media_type: Optional[str] = None) -> List[dict]:
-        query = {"media_type": media_type} if media_type else {}
-        cursor = self.dbs["tracking"]["xtream_categories"].find(query)
-        docs = await cursor.to_list(None)
-        return [convert_objectid_to_str(doc) for doc in docs]
-
-    async def upsert_xtream_category(self, key: str, media_type: str, **fields) -> dict:
-        now = datetime.utcnow()
-        origin = fields.pop("origin", None)
-        fields = {k: v for k, v in fields.items() if v is not None}
-        update = {
-            "$set": {**fields, "updated_at": now},
-            "$setOnInsert": {
-                "key": key,
-                "media_type": media_type,
-                "origin": origin or "auto",
-                "created_at": now,
-            },
-        }
-        await self.dbs["tracking"]["xtream_categories"].update_one(
-            {"key": key, "media_type": media_type}, update, upsert=True
-        )
-        doc = await self.dbs["tracking"]["xtream_categories"].find_one(
-            {"key": key, "media_type": media_type}
-        )
-        return convert_objectid_to_str(doc)
-
-    async def delete_xtream_category(self, key: str, media_type: str) -> bool:
-        result = await self.dbs["tracking"]["xtream_categories"].delete_one(
-            {"key": key, "media_type": media_type}
-        )
-        return result.deleted_count > 0
-
-    #-----
-    #----- Xtream Codes Facade
-    #-----
-
-    #----- Return (username, password) for a token, generating+persisting them on first use.
-    #----- The plaintext password is only ever returned the moment it's created; after that
-    #----- only its hash is stored, same pattern as admin_password.
-    async def get_or_create_xtream_credentials(self, token: str) -> Optional[Tuple[str, Optional[str]]]:
-        coll = self.dbs["tracking"]["api_tokens"]
-        doc = await coll.find_one({"token": token}, {"xtream_username": 1, "xtream_password": 1})
-        if not doc:
-            return None
-        if doc.get("xtream_username"):
-            return doc["xtream_username"], doc.get("xtream_password")
-
-        alphabet = string.ascii_lowercase + string.digits
-        username = "nl" + ''.join(secrets.choice(alphabet) for _ in range(8))
-        password = ''.join(secrets.choice(alphabet) for _ in range(10))
-        await coll.update_one(
-            {"token": token},
-            {"$set": {"xtream_username": username, "xtream_password": password, "xtream_password_hash": hash_password(password)}},
-        )
-        return username, password
-
-    #----- Set custom Xtream username/password for a token. Blank username keeps the
-    #----- current/generated one; blank password keeps the current hash (or generates
-    #----- one if none exists yet). Returns (username, plaintext_password_or_None), or
-    #----- None if token not found. Raises ValueError on invalid/duplicate input.
-    async def set_xtream_credentials(self, token: str, username: Optional[str], password: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
-        coll = self.dbs["tracking"]["api_tokens"]
-        doc = await coll.find_one({"token": token}, {"xtream_username": 1, "xtream_password_hash": 1, "xtream_password": 1})
-        if not doc:
-            return None
-
-        username = (username or "").strip()
-        password = (password or "").strip()
-        if username and not re.fullmatch(r"[A-Za-z0-9._-]{3,32}", username):
-            raise ValueError("Username: 3-32 chars, only letters, digits, . _ -")
-        if password and not re.fullmatch(r"[A-Za-z0-9._-]{4,64}", password):
-            raise ValueError("Password: 4-64 chars, only letters, digits, . _ -")
-
-        alphabet = string.ascii_lowercase + string.digits
-        final_user = username or doc.get("xtream_username") or "nl" + ''.join(secrets.choice(alphabet) for _ in range(8))
-        updates = {"xtream_username": final_user}
-        shown_password = None
-        if password:
-            updates["xtream_password_hash"] = hash_password(password)
-            updates["xtream_password"] = password
-            shown_password = password
-        elif not doc.get("xtream_password_hash"):
-            shown_password = ''.join(secrets.choice(alphabet) for _ in range(10))
-            updates["xtream_password_hash"] = hash_password(shown_password)
-            updates["xtream_password"] = shown_password
-        else:
-            shown_password = doc.get("xtream_password")
-
-        taken = await coll.find_one({"xtream_username": final_user, "token": {"$ne": token}}, {"_id": 1})
-        if taken:
-            raise ValueError("That Xtream username is already in use.")
-        try:
-            await coll.update_one({"token": token}, {"$set": updates})
-        except Exception as e:
-            if "duplicate key" in str(e).lower() or "E11000" in str(e):
-                raise ValueError("That Xtream username is already in use.")
-            raise
-        return final_user, shown_password
-
-    async def get_token_by_xtream_username(self, username: str) -> Optional[dict]:
-        doc = await self.dbs["tracking"]["api_tokens"].find_one({"xtream_username": username})
-        return convert_objectid_to_str(doc) if doc else None
-
-    #----- Deterministic int ID for a piece of content, upserted into the map so
-    #----- resolve_xtream_stream_id() can look it up later. Idempotent.
-    async def upsert_xtream_stream_id(
-        self, imdb_id: str, media_type: str, season_number: int = None, episode_number: int = None
-    ) -> int:
-        key = f"{imdb_id}:{season_number}:{episode_number}"
-        stream_id = zlib.crc32(key.encode()) & 0x7FFFFFFF
-        await self.dbs["tracking"]["xtream_stream_map"].update_one(
-            {"_id": stream_id},
-            {"$set": {
-                "imdb_id": imdb_id, "media_type": media_type,
-                "season_number": season_number, "episode_number": episode_number,
-            }},
-            upsert=True,
-        )
-        return stream_id
-
-    #----- Same mapping as upsert_xtream_stream_id but for many episodes in one
-    #----- round-trip (one bulk_write instead of N sequential upserts). items:
-    #----- [(imdb_id, media_type, season_number, episode_number), ...].
-    async def upsert_xtream_stream_ids_bulk(self, items: list) -> dict:
-        from pymongo import UpdateOne
-
-        ids = {}
-        ops = []
-        new_keys = []
-        for imdb_id, media_type, season_number, episode_number in items:
-            key = f"{imdb_id}:{season_number}:{episode_number}"
-            stream_id = zlib.crc32(key.encode()) & 0x7FFFFFFF
-            ids[key] = stream_id
-            if key in self._upserted_stream_keys:
-                continue
-            new_keys.append(key)
-            ops.append(UpdateOne(
-                {"_id": stream_id},
-                {"$set": {
-                    "imdb_id": imdb_id, "media_type": media_type,
-                    "season_number": season_number, "episode_number": episode_number,
-                }},
-                upsert=True,
-            ))
-        if ops:
-            await self.dbs["tracking"]["xtream_stream_map"].bulk_write(ops, ordered=False)
-            self._upserted_stream_keys.update(new_keys)
-        return ids
-
-    async def resolve_xtream_stream_id(self, stream_id: int) -> Optional[dict]:
-        doc = await self.dbs["tracking"]["xtream_stream_map"].find_one({"_id": stream_id})
-        return doc
 
     #-----
     #----- Admin / Link Checker Methods

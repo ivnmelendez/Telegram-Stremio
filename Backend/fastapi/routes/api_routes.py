@@ -7,7 +7,6 @@ import secrets
 import shutil
 from datetime import datetime
 from time import time
-from urllib.parse import urlparse
 
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
@@ -15,13 +14,10 @@ from pyrogram.enums import ChatMemberStatus, ChatMembersFilter
 from pyrogram.errors import FloodWait
 from pyrogram.types import ChatPrivileges
 
-import re
-
 import Backend
 from Backend import StartTime, __version__, db
 from Backend.fastapi.routes.stream_routes import _streamer_by_client
 from Backend.fastapi.routes.stremio_routes import invalidate_membership_cache
-from Backend.fastapi.routes import xtream_routes
 from Backend.helper.analytics import get_activity_overview
 from Backend.helper.auto_catalog import (
     get_auto_catalog_settings,
@@ -372,16 +368,6 @@ async def create_token_api(payload: dict):
             subscription_exempt=bool(payload.get("subscription_exempt")),
             max_concurrent_streams=_parse_concurrency(payload.get("max_concurrent_streams")),
         )
-        #----- Optional custom Xtream login chosen at creation time
-        xt_user = (payload.get("xtream_username") or "").strip()
-        xt_pass = (payload.get("xtream_password") or "").strip()
-        if xt_user or xt_pass:
-            try:
-                await db.set_xtream_credentials(new_token["token"], xt_user, xt_pass)
-            except ValueError as e:
-                #----- Token is already created; drop it so the admin can retry cleanly
-                await db.revoke_api_token(new_token["token"])
-                raise HTTPException(status_code=400, detail=str(e))
         return new_token
     except HTTPException:
         raise
@@ -456,22 +442,6 @@ async def update_token_limits_api(token: str, payload: dict):
             await db.set_token_concurrency(token, _parse_concurrency(payload.get("max_concurrent_streams")))
         return {"message": "Limits updated successfully"}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-#----- Third-party IPTV provider account given to this user. Read by the Xtream
-#----- facade only to 302 live TV requests to the provider (never fetched here).
-async def set_token_provider_api(token: str, payload: dict):
-    try:
-        provider = {
-            "provider_name": (payload.get("provider_name") or "").strip(),
-            "host": (payload.get("host") or "").strip(),
-            "username": (payload.get("username") or "").strip(),
-            "password": (payload.get("password") or "").strip(),
-        }
-        await db.set_token_provider_info(token, provider)
-        return {"message": "Provider info saved"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -960,40 +930,6 @@ async def get_all_tokens_api() -> dict:
         return {"tokens": result, "subscription": sub_on}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-#----- Xtream Codes credentials for a token (TiviMate/IPTV player login). Generated
-#----- on first call; the plaintext password is only ever returned that first time.
-async def get_xtream_credentials_api(token: str) -> dict:
-    creds = await db.get_or_create_xtream_credentials(token)
-    if not creds:
-        raise HTTPException(status_code=404, detail="Token not found.")
-    username, password = creds
-    parsed = urlparse(SettingsManager.current().base_url or "")
-    return {
-        "username": username,
-        "password": password,  #----- None if it already existed
-        "host": parsed.hostname or "",
-        "port": str(parsed.port or (443 if parsed.scheme == "https" else 80)),
-    }
-
-
-#----- Edit Xtream login (custom username and/or password) for a token
-async def set_xtream_credentials_api(token: str, payload: dict) -> dict:
-    try:
-        creds = await db.set_xtream_credentials(token, payload.get("username"), payload.get("password"))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    if not creds:
-        raise HTTPException(status_code=404, detail="Token not found.")
-    username, password = creds
-    parsed = urlparse(SettingsManager.current().base_url or "")
-    return {
-        "username": username,
-        "password": password,
-        "host": parsed.hostname or "",
-        "port": str(parsed.port or (443 if parsed.scheme == "https" else 80)),
-    }
 
 
 async def revoke_token_api(token: str) -> dict:
@@ -2968,215 +2904,3 @@ async def bot_admin_apply_status_api() -> dict:
             "error": st["error"],
         },
     }
-
-
-#-----
-#----- Family / Friend Login Users (admin-managed accounts for TuvoraTV login)
-#-----
-
-def _family_manifest_url(api_token: str) -> str:
-    return f"{SettingsManager.current().base_url}/stremio/{api_token}/manifest.json"
-
-
-def _family_user_public(doc: dict) -> dict:
-    return {
-        "username": doc.get("username"),
-        "api_token": doc.get("api_token"),
-        "manifest_url": _family_manifest_url(doc.get("api_token")) if doc.get("api_token") else None,
-        "xtream": doc.get("xtream"),
-        "is_active": doc.get("is_active", True),
-        "created_at": doc.get("created_at"),
-    }
-
-
-async def list_family_users_api() -> dict:
-    docs = await db.list_family_users()
-    return {"users": [_family_user_public(d) for d in docs]}
-
-
-async def create_family_user_api(payload: dict) -> dict:
-    username = (payload.get("username") or "").strip()
-    password = payload.get("password") or ""
-    api_token = (payload.get("api_token") or "").strip()
-    xtream = payload.get("xtream") or None
-
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="username and password are required")
-    if not api_token:
-        raise HTTPException(status_code=400, detail="api_token is required")
-    if not await db.get_api_token(api_token):
-        raise HTTPException(status_code=404, detail="api_token does not exist")
-    if xtream and not all(xtream.get(k) for k in ("host", "username", "password")):
-        raise HTTPException(status_code=400, detail="xtream requires host, username and password")
-
-    doc = await db.create_family_user(username, hash_password(password), api_token, xtream)
-    if not doc:
-        raise HTTPException(status_code=409, detail="username already exists")
-    return _family_user_public(doc)
-
-
-async def update_family_user_api(username: str, payload: dict) -> dict:
-    updates: dict = {}
-    if payload.get("password"):
-        updates["password_hash"] = hash_password(payload["password"])
-    if payload.get("api_token"):
-        api_token = payload["api_token"].strip()
-        if not await db.get_api_token(api_token):
-            raise HTTPException(status_code=404, detail="api_token does not exist")
-        updates["api_token"] = api_token
-    if "xtream" in payload:
-        xtream = payload.get("xtream") or None
-        if xtream and not all(xtream.get(k) for k in ("host", "username", "password")):
-            raise HTTPException(status_code=400, detail="xtream requires host, username and password")
-        updates["xtream"] = xtream
-    if "is_active" in payload:
-        updates["is_active"] = bool(payload["is_active"])
-
-    ok = await db.update_family_user(username, updates)
-    if not ok:
-        raise HTTPException(status_code=404, detail="user not found")
-    doc = await db.get_family_user_by_username(username)
-    return _family_user_public(doc)
-
-
-async def delete_family_user_api(username: str) -> dict:
-    ok = await db.delete_family_user(username)
-    if not ok:
-        raise HTTPException(status_code=404, detail="user not found")
-    return {"status": "success", "message": "User deleted."}
-
-
-#----- Public (no admin session) - called by the TuvoraTV login screen.
-async def family_login_api(payload: dict) -> dict:
-    username = (payload.get("username") or "").strip()
-    password = payload.get("password") or ""
-    if not username or not password:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    doc = await db.get_family_user_by_username(username)
-    if not doc or not doc.get("is_active", True) or not verify_password(password, doc.get("password_hash", "")):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-
-    api_token = doc.get("api_token")
-    if not api_token or not await db.get_api_token(api_token):
-        raise HTTPException(status_code=409, detail="This account has no valid addon assigned. Contact the admin.")
-
-    return {
-        "manifest_url": _family_manifest_url(api_token),
-        "xtream": doc.get("xtream"),
-    }
-
-
-#-----
-#----- Xtream category overrides (admin control over the auto-computed
-#----- genre/platform categories exposed by the Xtream Codes API)
-#-----
-def _slugify_category_key(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return slug or "categoria"
-
-
-async def list_xtream_categories_api(media_type: str) -> dict:
-    if media_type not in ("movie", "series"):
-        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
-
-    overrides = {d["key"]: d for d in await db.list_xtream_categories(media_type)}
-    counts = await xtream_routes.tag_counts(media_type)
-
-    #----- Movies y series: solo plataforma (ver xtream_routes.get_vod_categories/
-    #----- get_series_categories) - el panel admin refleja lo mismo.
-    platforms = await (
-        xtream_routes._movie_categories_set() if media_type == "movie"
-        else xtream_routes._series_categories_set()
-    )
-    raw_tags = xtream_routes._ordered_platforms(platforms)
-
-    def _row(key: str, raw: str | None, override: dict) -> dict:
-        tags = override.get("tags") or []
-        count = sum(counts.get(t, 0) for t in tags) if tags else counts.get(raw or key, 0)
-        return {
-            "key": key,
-            "media_type": media_type,
-            "origin": override.get("origin", "auto"),
-            "raw_tag": raw,
-            "display_name": override.get("display_name") or xtream_routes._display_name(raw or key),
-            "hidden": override.get("hidden", False),
-            "order": override.get("order"),
-            "sort": override.get("sort", "newest"),
-            "tags": tags,
-            "count": count,
-        }
-
-    seen: set = set()
-    rows: list = []
-    for raw in raw_tags:
-        key = xtream_routes._effective_tag(overrides, raw) or raw
-        if key in seen:
-            continue
-        seen.add(key)
-        rows.append(_row(key, raw if key == raw else None, overrides.get(key, {})))
-
-    for key, override in overrides.items():
-        if override.get("origin") != "manual" or key in seen:
-            continue
-        rows.append(_row(key, None, override))
-
-    rows.sort(key=lambda r: (r["order"] is None, r["order"] or 0, r["display_name"]))
-    return {"categories": rows}
-
-
-async def create_xtream_category_api(payload: dict) -> dict:
-    media_type = payload.get("media_type")
-    if media_type not in ("movie", "series"):
-        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
-    display_name = (payload.get("display_name") or "").strip()
-    if not display_name:
-        raise HTTPException(status_code=400, detail="display_name is required")
-    tags = [t for t in (payload.get("tags") or []) if t]
-    if not tags:
-        raise HTTPException(status_code=400, detail="at least one tag to merge is required")
-
-    existing_keys = {d["key"] for d in await db.list_xtream_categories(media_type)}
-    base_key = _slugify_category_key(display_name)
-    key, n = base_key, 2
-    while key in existing_keys:
-        key = f"{base_key}-{n}"
-        n += 1
-
-    result = await db.upsert_xtream_category(
-        key, media_type,
-        origin="manual",
-        display_name=display_name,
-        tags=tags,
-        sort=payload.get("sort") or "newest",
-        order=payload.get("order"),
-    )
-    xtream_routes.invalidate_catalog_cache()
-    return result
-
-
-async def update_xtream_category_api(key: str, media_type: str, payload: dict) -> dict:
-    if media_type not in ("movie", "series"):
-        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'series'")
-    fields: dict = {}
-    if "display_name" in payload:
-        fields["display_name"] = (payload.get("display_name") or "").strip() or None
-    if "hidden" in payload:
-        fields["hidden"] = bool(payload["hidden"])
-    if "order" in payload:
-        fields["order"] = payload["order"]
-    if "sort" in payload:
-        fields["sort"] = payload.get("sort") or "newest"
-    if "tags" in payload:
-        fields["tags"] = [t for t in (payload.get("tags") or []) if t]
-    result = await db.upsert_xtream_category(key, media_type, **fields)
-    xtream_routes.invalidate_catalog_cache()
-    return result
-
-
-async def delete_xtream_category_api(key: str, media_type: str) -> dict:
-    ok = await db.delete_xtream_category(key, media_type)
-    if not ok:
-        raise HTTPException(status_code=404, detail="category not found")
-    xtream_routes.invalidate_catalog_cache()
-    return {"status": "success", "message": "Category override removed."}

@@ -22,10 +22,7 @@ from Backend.fastapi.routes.api_routes import (
     clear_cache_api,
     clear_stream_analytics_api,
     create_custom_catalog_api,
-    create_family_user_api,
     create_token_api,
-    delete_family_user_api,
-    family_login_api,
     grant_lifetime_api,
     set_token_lifetime_api,
     set_token_expiry_api,
@@ -48,8 +45,6 @@ from Backend.fastapi.routes.api_routes import (
     get_db_stats_api,
     get_all_subscribers_api,
     get_all_tokens_api,
-    get_xtream_credentials_api,
-    set_xtream_credentials_api,
     get_auto_catalog_settings_api,
     get_catalog_order_api,
     update_catalog_order_api,
@@ -121,25 +116,15 @@ from Backend.fastapi.routes.api_routes import (
     update_settings_api,
     update_subscription_plan_api,
     update_token_limits_api,
-    set_token_provider_api,
-    list_family_users_api,
-    update_family_user_api,
-    list_xtream_categories_api,
-    create_xtream_category_api,
-    update_xtream_category_api,
-    delete_xtream_category_api,
 )
 from Backend.fastapi.routes.stream_routes import decay_client_failures
 from Backend.fastapi.routes.stream_routes import router as stream_router
 from Backend.fastapi.routes.cf_routes import router as cf_router
 from Backend.fastapi.routes.stremio_routes import router as stremio_router
 from Backend.fastapi.routes.webdav_routes import router as webdav_router
-from Backend.fastapi.routes.xtream_routes import router as xtream_router
 from Backend.fastapi.routes.template_routes import (
     admin_access_page,
     admin_dashboard_page,
-    admin_family_users_page,
-    admin_xtream_categories_page,
     admin_requests_page,
     admin_subscriptions_page,
     public_request_page,
@@ -173,11 +158,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-#----- Catalog JSON (get_vod_streams/get_series) runs into the MBs at
-#----- thousands of titles - gzip cuts that 80-90% before it hits the wire,
-#----- same as any real Xtream panel behind nginx with gzip on. Streaming
-#----- routes are excluded: the video is already compressed, and gzipping
-#----- every chunk adds CPU overhead that stalls playback start.
+#----- Catalog JSON responses run into the MBs at thousands of titles -
+#----- gzip cuts that 80-90% before it hits the wire. Streaming routes are
+#----- excluded: the video is already compressed, and gzipping every chunk
+#----- adds CPU overhead that stalls playback start.
 app.add_middleware(GZipMiddleware, minimum_size=500)
 _STREAM_PATH_PREFIXES = ("/dl/", "/movie/", "/series/")
 
@@ -208,7 +192,6 @@ app.include_router(stream_router)
 app.include_router(cf_router)
 app.include_router(stremio_router)
 app.include_router(webdav_router)
-app.include_router(xtream_router)
 
 
 #----- Public routes (no authentication)
@@ -219,11 +202,6 @@ async def login_get(request: Request):
 @app.post("/login", response_class=HTMLResponse)
 async def login_post_route(request: Request, username: str = Form(...), password: str = Form(...)):
     return await login_post(request, username, password)
-
-#----- TuvoraTV family/friend login - stateless JSON, no admin session involved
-@app.post("/api/family/login")
-async def family_login(payload: dict):
-    return await family_login_api(payload)
 
 @app.get("/logout")
 async def logout_route(request: Request):
@@ -398,37 +376,9 @@ async def create_token(payload: dict, _: bool = Depends(require_auth)):
 async def update_token(token: str, payload: dict, _: bool = Depends(require_auth)):
     return await update_token_limits_api(token, payload)
 
-@app.put("/api/tokens/{token}/provider")
-async def update_token_provider(token: str, payload: dict, _: bool = Depends(require_auth)):
-    return await set_token_provider_api(token, payload)
-
 @app.delete("/api/tokens/{token}")
 async def revoke_token(token: str, _: bool = Depends(require_auth)):
     return await revoke_token_api(token)
-
-@app.post("/api/tokens/{token}/xtream")
-async def get_xtream_credentials(token: str, _: bool = Depends(require_auth)):
-    return await get_xtream_credentials_api(token)
-
-@app.put("/api/tokens/{token}/xtream")
-async def put_xtream_credentials(token: str, payload: dict, _: bool = Depends(require_auth)):
-    return await set_xtream_credentials_api(token, payload)
-
-@app.get("/api/family-users")
-async def list_family_users(_: bool = Depends(require_auth)):
-    return await list_family_users_api()
-
-@app.post("/api/family-users")
-async def create_family_user(payload: dict, _: bool = Depends(require_auth)):
-    return await create_family_user_api(payload)
-
-@app.put("/api/family-users/{username}")
-async def update_family_user(username: str, payload: dict, _: bool = Depends(require_auth)):
-    return await update_family_user_api(username, payload)
-
-@app.delete("/api/family-users/{username}")
-async def delete_family_user(username: str, _: bool = Depends(require_auth)):
-    return await delete_family_user_api(username)
 
 @app.get("/api/system/stats")
 async def get_system_stats(_: bool = Depends(require_auth)):
@@ -491,30 +441,6 @@ async def manage_subscriber(user_id: int, payload: dict, _: bool = Depends(requi
 @app.get("/admin/access", response_class=HTMLResponse)
 async def admin_access(request: Request, _: bool = Depends(require_auth)):
     return await admin_access_page(request, _)
-
-@app.get("/admin/family-users", response_class=HTMLResponse)
-async def admin_family_users(request: Request, _: bool = Depends(require_auth)):
-    return await admin_family_users_page(request, _)
-
-@app.get("/admin/xtream-categories", response_class=HTMLResponse)
-async def admin_xtream_categories(request: Request, _: bool = Depends(require_auth)):
-    return await admin_xtream_categories_page(request, _)
-
-@app.get("/api/xtream-categories")
-async def get_xtream_categories(media_type: str = "movie", _: bool = Depends(require_auth)):
-    return await list_xtream_categories_api(media_type)
-
-@app.post("/api/xtream-categories")
-async def post_xtream_category(payload: dict, _: bool = Depends(require_auth)):
-    return await create_xtream_category_api(payload)
-
-@app.put("/api/xtream-categories/{key}")
-async def put_xtream_category(key: str, payload: dict, media_type: str = "movie", _: bool = Depends(require_auth)):
-    return await update_xtream_category_api(key, media_type, payload)
-
-@app.delete("/api/xtream-categories/{key}")
-async def delete_xtream_category(key: str, media_type: str = "movie", _: bool = Depends(require_auth)):
-    return await delete_xtream_category_api(key, media_type)
 
 @app.get("/api/admin/access/tokens")
 async def get_access_tokens(_: bool = Depends(require_auth)):

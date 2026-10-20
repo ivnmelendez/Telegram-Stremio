@@ -16,13 +16,7 @@ async def verify_token(token: str):
     token_data = await db.get_api_token(token)
     if not token_data:
         raise HTTPException(status_code=401, detail="Invalid or expired API token")
-    return await annotate_token(token_data)
 
-
-#----- Same annotation as verify_token(), for callers that already hold the
-#----- api_tokens doc (e.g. looked up by xtream_username) - skips the second
-#----- Mongo round-trip verify_token() would otherwise do to refetch it by token.
-async def annotate_token(token_data: dict):
     limits = token_data.get("limits", {})
     usage = token_data.get("usage", {})
 
