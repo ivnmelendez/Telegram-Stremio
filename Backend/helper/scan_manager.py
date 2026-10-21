@@ -990,7 +990,7 @@ class DuplicateManager:
         try:
             for h in ids:
                 try:
-                    if await db.delete_media_by_stream_id(h, delete_file=True):
+                    if await db.delete_media_by_stream_id(h, delete_file=False):
                         purged += 1
                 except Exception as e:
                     LOGGER.error(f"[Duplicates] purge failed for {h}: {e}")

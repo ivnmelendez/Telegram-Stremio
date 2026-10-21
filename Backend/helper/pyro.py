@@ -197,8 +197,11 @@ async def get_file_ids(client: Client, chat_id: int, message_id: int) -> Optiona
 
 
 def get_readable_file_size(size_in_bytes):
-    size_in_bytes = int(size_in_bytes) if str(size_in_bytes).isdigit() else 0
-    if not size_in_bytes:
+    try:
+        size_in_bytes = float(size_in_bytes)
+    except (TypeError, ValueError):
+        size_in_bytes = 0
+    if size_in_bytes <= 0:
         return '0B'
 
     index, SIZE_UNITS = 0, ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
