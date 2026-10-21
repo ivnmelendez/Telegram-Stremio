@@ -718,6 +718,15 @@ async def update_settings(payload: dict, _: bool = Depends(require_auth)):
     return await update_settings_api(payload)
 
 
+@app.post("/api/admin/settings/formatter-preview")
+async def formatter_preview(payload: dict, _: bool = Depends(require_auth)):
+    from Backend.helper.stream_formatter import PRESETS, build_parse_value, render
+    tpl = PRESETS.get(payload.get("preset")) or {"name": str(payload.get("name") or ""), "description": str(payload.get("description") or "")}
+    pv = build_parse_value(str(payload.get("filename") or "video.mkv"), 2_500_000_000, channel="My Channel",
+                           meta={"queryType": "movie", "type": "movie"})
+    return {"name": render(tpl["name"], pv), "description": render(tpl["description"], pv)}
+
+
 #----- Telegram user session login (replaces manual USER_SESSION_STRING)
 @app.get("/api/admin/settings/session")
 async def session_status(_: bool = Depends(require_auth)):

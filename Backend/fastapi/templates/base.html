@@ -475,6 +475,16 @@ tailwind.config = {
     }
 }
 </script>
+<script>
+/* Clipboard API needs HTTPS; fall back to execCommand on plain-HTTP LAN access */
+if (!navigator.clipboard) Object.defineProperty(navigator, 'clipboard', { value: { writeText: t => new Promise((ok, fail) => {
+    const a = document.createElement('textarea');
+    a.value = t; a.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(a); a.select();
+    const done = document.execCommand('copy'); a.remove();
+    done ? ok() : fail(new Error('Copy failed'));
+}) } });
+</script>
 </head>
 
 <body class="pt-24 pb-12 antialiased">

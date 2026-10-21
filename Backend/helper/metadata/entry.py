@@ -265,6 +265,9 @@ async def _resolve_id_candidate(default_id, media_type: str) -> dict | None:
             detail = await cinemeta.cached_detail(imdb_id, imdb_type)
         except Exception as e:
             LOGGER.warning(f"IMDb id candidate resolve failed for '{imdb_id}': {e}")
+        else:
+            if not detail:
+                return None
         images = format_imdb_images(imdb_id)
         if detail and detail.get("title"):
             return _candidate_entry(

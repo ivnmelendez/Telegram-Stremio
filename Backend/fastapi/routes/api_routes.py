@@ -1849,7 +1849,7 @@ async def update_settings_api(payload: dict) -> dict:
         del payload["session_secret"]
 
     #----- Type coercion and validation
-    bool_keys = {"replace_mode", "duplicate_protection", "hide_catalog", "subscription", "show_proxy_and_non_proxy_both", "mediaflow_proxy", "announce_new_content", "delete_on_metadata_fail", "better_poster_enabled", "rpdb_enabled", "fanart_enabled", "fanart_shuffle", "fanart_low_res_poster"}
+    bool_keys = {"replace_mode", "duplicate_protection", "hide_catalog", "subscription", "show_proxy_and_non_proxy_both", "mediaflow_proxy", "announce_new_content", "delete_on_metadata_fail", "better_poster_enabled", "rpdb_enabled", "spatial_poster_enabled", "fanart_enabled", "fanart_shuffle", "fanart_low_res_poster"}
     for key in bool_keys:
         if key in payload:
             payload[key] = bool(payload[key])
@@ -1866,6 +1866,25 @@ async def update_settings_api(payload: dict) -> dict:
         if payload["better_poster"] and "{imdb_id}" not in payload["better_poster"]:
             raise HTTPException(status_code=400, detail="wrong betterposter url")
 
+    if "spatial_poster" in payload:
+        payload["spatial_poster"] = str(payload["spatial_poster"] or "").strip()
+        if payload["spatial_poster"] and "{imdb_id}" not in payload["spatial_poster"]:
+            raise HTTPException(status_code=400, detail="SpatialPosters URL must contain {imdb_id}")
+
+    if payload.get("spatial_poster_enabled") and not payload.get("spatial_poster"):
+        raise HTTPException(status_code=400, detail="SpatialPosters URL is required")
+
+    if "stream_formatter" in payload:
+        from Backend.helper.stream_formatter import PRESETS
+        if payload["stream_formatter"] not in ("default", "custom", *PRESETS):
+            raise HTTPException(status_code=400, detail="Unknown stream formatter")
+    for key in ("formatter_name", "formatter_description"):
+        if key in payload:
+            payload[key] = str(payload[key] or "")[:20000]
+
+    if "default_streaming" in payload and payload["default_streaming"] not in ("bots", "userbot"):
+        raise HTTPException(status_code=400, detail="default_streaming must be 'bots' or 'userbot'")
+
     if "rpdb_api_key" in payload:
         payload["rpdb_api_key"] = str(payload["rpdb_api_key"] or "").strip()
 
@@ -1878,7 +1897,7 @@ async def update_settings_api(payload: dict) -> dict:
         except (ValueError, TypeError):
             payload["fanart_shuffle_interval"] = 5
 
-    if len([k for k in ("better_poster_enabled", "rpdb_enabled", "fanart_enabled") if payload.get(k)]) > 1:
+    if len([k for k in ("better_poster_enabled", "rpdb_enabled", "spatial_poster_enabled", "fanart_enabled") if payload.get(k)]) > 1:
         raise HTTPException(status_code=400, detail="Enable only one poster provider at a time")
 
     if payload.get("fanart_enabled") and not str(payload.get("fanart_api_key") or "").strip():
