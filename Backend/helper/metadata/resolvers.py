@@ -15,21 +15,6 @@ from Backend.logger import LOGGER
 
 # ── Movies: TMDB > Cinemeta ──────────────────────────────────────────────────
 
-#----- Cinemeta has no "where to watch" data either - same reasoning as
-#----- _enrich_series_networks, for the rare movie paths that don't already
-#----- go through tmdb.build_movie_payload (which sets networks itself).
-async def _enrich_movie_networks(result: Optional[dict]) -> Optional[dict]:
-    if not result or result.get("networks") or not result.get("tmdb_id"):
-        return result
-    try:
-        movie = await tmdb.details("movie", result["tmdb_id"])
-        if movie:
-            result["networks"] = list(getattr(movie, "networks", None) or [])
-    except Exception as e:
-        LOGGER.debug(f"[MOVIE] networks enrichment failed for tmdb_id={result.get('tmdb_id')}: {e}")
-    return result
-
-
 async def resolve_movie(
     title: str,
     encoded_string,
@@ -50,9 +35,7 @@ async def resolve_movie(
         try:
             detail = await cinemeta.cached_detail(imdb_id, "movie")
             if detail:
-                return await _enrich_movie_networks(
-                    cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
-                )
+                return cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
         except Exception as e:
             LOGGER.warning(f"Cinemeta explicit movie fetch failed [{imdb_id}]: {e}")
 
@@ -86,9 +69,7 @@ async def resolve_movie(
                         movie = await tmdb.details("movie", es_item.id)
                         if movie:
                             return tmdb.build_movie_payload(movie, quality, encoded_string)
-                    return await _enrich_movie_networks(
-                        cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
-                    )
+                    return cinemeta.build_movie_payload(detail, imdb_id, title, quality, encoded_string)
                 LOGGER.info(
                     f"[MOVIE] Cinemeta title mismatch for '{title}': "
                     f"got '{detail.get('title')}' (sim={sim:.2f})"
@@ -101,23 +82,6 @@ async def resolve_movie(
 
 
 # ── Series: TVDB > Cinemeta > TMDB ────────────────────────────────────────────
-
-#----- TVDB and Cinemeta payloads never set `networks` (neither provider has
-#----- "where to watch" data) - only a direct TMDB hit does. Series resolved
-#----- via TVDB/Cinemeta would otherwise never get a streaming-platform
-#----- category. Enrich with a TMDB lookup (MX, falls back to US) whenever we
-#----- have a tmdb_id and networks came back empty.
-async def _enrich_series_networks(result: Optional[dict]) -> Optional[dict]:
-    if not result or result.get("networks") or not result.get("tmdb_id"):
-        return result
-    try:
-        tv = await tmdb.details("tv", result["tmdb_id"])
-        if tv:
-            result["networks"] = list(getattr(tv, "networks", None) or [])
-    except Exception as e:
-        LOGGER.debug(f"[SERIES] networks enrichment failed for tmdb_id={result.get('tmdb_id')}: {e}")
-    return result
-
 
 async def resolve_series(
     title: str,
@@ -162,9 +126,7 @@ async def resolve_series(
             ep = await tmdb.episode_details(found_tmdb_id, season, episode) if tv else None
             if tv and ep:
                 LOGGER.info(f"[SERIES] TMDB hit for '{title}' S{season:02d}E{episode:02d}")
-                return await _enrich_series_networks(
-                    tmdb.build_tv_payload(tv, ep, season, episode, quality, encoded_string)
-                )
+                return tmdb.build_tv_payload(tv, ep, season, episode, quality, encoded_string)
     except Exception as e:
         LOGGER.warning(f"[SERIES] TMDB error for '{title}': {e}")
 
@@ -175,7 +137,7 @@ async def resolve_series(
         )
         if result:
             LOGGER.info(f"[SERIES] TMDB miss for '{title}' -> TVDB hit S{season:02d}E{episode:02d}")
-            return await _enrich_series_networks(result)
+            return result
     except Exception as e:
         LOGGER.warning(f"[SERIES] TVDB error for '{title}': {e}")
 
@@ -199,9 +161,9 @@ async def resolve_series(
                         if tv:
                             tv_ep = await tmdb.episode_details(es_item.id, season, episode)
                             return tmdb.build_tv_payload(tv, tv_ep, season, episode, quality, encoded_string)
-                    return await _enrich_series_networks(cinemeta.build_tv_payload(
+                    return cinemeta.build_tv_payload(
                         detail, ep or {}, imdb_id, title, season, episode, quality, encoded_string
-                    ))
+                    )
                 LOGGER.info(
                     f"[SERIES] Cinemeta title mismatch for '{title}': "
                     f"got '{detail.get('title')}' (sim={sim:.2f})"

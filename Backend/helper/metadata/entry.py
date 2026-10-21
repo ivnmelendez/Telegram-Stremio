@@ -425,7 +425,6 @@ def _to_selection_payload(data: dict, media_type: str) -> dict:
         "backdrop": data.get("backdrop"),
         "logo": data.get("logo"),
         "genres": data.get("genres", []),
-        "networks": data.get("networks", []),
         "cast": data.get("cast", []),
         "runtime": data.get("runtime"),
         "media_type": media_type,
@@ -482,7 +481,6 @@ async def fetch_selected_tv_metadata(selected_id: str) -> dict | None:
             "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
             "logo": tmdb.get_tmdb_logo(getattr(tv, "images", None)),
             "genres": [g.name for g in (tv.genres or [])],
-            "networks": list(getattr(tv, "networks", None) or []),
             "cast": [
                 getattr(c, "name", None) or getattr(c, "original_name", None)
                 for c in (getattr(getattr(tv, "credits", None), "cast", None) or [])
@@ -492,15 +490,7 @@ async def fetch_selected_tv_metadata(selected_id: str) -> dict | None:
         }
 
     images = format_imdb_images(imdb_id)
-    networks: list = []
     cinemeta_tmdb_id = imdb_tv.get("moviedb_id")
-    if cinemeta_tmdb_id:
-        try:
-            tv_for_networks = await tmdb.details("tv", int(cinemeta_tmdb_id))
-            if tv_for_networks:
-                networks = list(getattr(tv_for_networks, "networks", None) or [])
-        except Exception:
-            pass
     return {
         "tmdb_id": int(cinemeta_tmdb_id) if cinemeta_tmdb_id else None,
         "imdb_id": imdb_id,
@@ -512,7 +502,6 @@ async def fetch_selected_tv_metadata(selected_id: str) -> dict | None:
         "backdrop": images["backdrop"],
         "logo": images["logo"],
         "genres": imdb_tv.get("genre", []),
-        "networks": networks,
         "cast": imdb_tv.get("cast", []),
         "runtime": str(imdb_tv.get("runtime") or ""),
         "media_type": "tv",

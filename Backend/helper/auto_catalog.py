@@ -1,4 +1,6 @@
 import asyncio
+import re
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -7,77 +9,106 @@ import httpx
 from Backend.helper.metadata import tmdb_api_key
 from Backend.logger import LOGGER
 
-AUTO_CATALOG_REGION = "IN"
+AUTO_CATALOG_REGION = "MX"
 AUTO_SYNC_CONCURRENCY = 5
 
 #----- User can choose exactly which auto catalogs are enabled.
 AUTO_CATALOG_DEFINITIONS = [
-    {"key": "bollywood", "name": "Bollywood", "group": "Language"},
-    {"key": "hollywood", "name": "Hollywood", "group": "Language"},
-    {"key": "anime", "name": "Anime", "group": "Language"},
-    {"key": "kdrama", "name": "K-Drama", "group": "Language"},
-    {"key": "bengali", "name": "Bengali", "group": "Language"},
-    {"key": "south_indian", "name": "South Indian", "group": "Language"},
-    {"key": "tamil", "name": "Tamil", "group": "Language"},
-    {"key": "telugu", "name": "Telugu", "group": "Language"},
-    {"key": "malayalam", "name": "Malayalam", "group": "Language"},
-    {"key": "kannada", "name": "Kannada", "group": "Language"},
-    {"key": "japanese", "name": "Japanese", "group": "Language"},
-    {"key": "korean", "name": "Korean", "group": "Language"},
+    {"key": "accion_aventura", "name": "Acción y Aventura", "group": "Categorías"},
+    {"key": "comedia", "name": "Comedia", "group": "Categorías"},
+    {"key": "terror_suspenso", "name": "Terror y Suspenso", "group": "Categorías"},
+    {"key": "scifi_fantasia", "name": "Ciencia Ficción y Fantasía", "group": "Categorías"},
+    {"key": "romance", "name": "Romance", "group": "Categorías"},
+    {"key": "drama_crimen", "name": "Drama y Crimen", "group": "Categorías"},
+    {"key": "animacion_familia", "name": "Animación y Familia", "group": "Categorías"},
+    {"key": "anime", "name": "Anime", "group": "Categorías"},
+    {"key": "kdrama", "name": "K-Drama", "group": "Categorías"},
+    {"key": "latino_mexicano", "name": "Cine Latino y Mexicano", "group": "Categorías"},
 
-    {"key": "top_rated", "name": "Top Rated", "group": "Smart"},
-    {"key": "recently_added", "name": "Recently Added", "group": "Smart"},
+    {"key": "trending_movies", "name": "Top 100 Tendencias Películas", "group": "Smart"},
+    {"key": "trending_tv", "name": "Top 100 Tendencias Series", "group": "Smart"},
+    {"key": "top_rated", "name": "Mejor Calificadas", "group": "Smart"},
+    {"key": "recently_added", "name": "Estrenos Recientes", "group": "Smart"},
 
     {"key": "netflix", "name": "Netflix", "group": "OTT"},
     {"key": "prime_video", "name": "Prime Video", "group": "OTT"},
-    {"key": "hotstar", "name": "Hotstar", "group": "OTT"},
-    {"key": "apple_tv", "name": "Apple TV", "group": "OTT"},
-    {"key": "hulu", "name": "Hulu", "group": "OTT"},
-    {"key": "hbo", "name": "HBO", "group": "OTT"},
-    {"key": "jiocinema", "name": "JioCinema", "group": "OTT"},
-    {"key": "zee5", "name": "ZEE5", "group": "OTT"},
-    {"key": "sonyliv", "name": "SonyLIV", "group": "OTT"},
-    {"key": "mx_player", "name": "MX Player", "group": "OTT"},
+    {"key": "disney_plus", "name": "Disney+", "group": "OTT"},
+    {"key": "max", "name": "Max", "group": "OTT"},
+    {"key": "vix", "name": "ViX", "group": "OTT"},
+    {"key": "apple_tv", "name": "Apple TV+", "group": "OTT"},
+    {"key": "paramount_plus", "name": "Paramount+", "group": "OTT"},
+    {"key": "peacock", "name": "Peacock", "group": "OTT"},
+    {"key": "universal_plus", "name": "Universal+", "group": "OTT"},
+    {"key": "claro_video", "name": "Claro Video", "group": "OTT"},
     {"key": "crunchyroll", "name": "Crunchyroll", "group": "OTT"},
+    {"key": "hulu", "name": "Hulu", "group": "OTT"},
 ]
 
 CATALOG_BY_KEY = {item["key"]: item for item in AUTO_CATALOG_DEFINITIONS}
 
-_LANGUAGE_CATALOGS = {
-    "hi": ["Bollywood"],
-    "en": ["Hollywood"],
-    "ja": ["Japanese"],
-    "ko": ["Korean"],
-    "bn": ["Bengali"],
-    "te": ["South Indian", "Telugu"],
-    "ta": ["South Indian", "Tamil"],
-    "ml": ["South Indian", "Malayalam"],
-    "kn": ["South Indian", "Kannada"],
+_PROVIDER_SUFFIX_RE = re.compile(
+    r"\s+(Amazon Channel|Apple TV [Cc]hannel|Premium|Essential|Basic with Ads|Standard with Ads|Roku Premium Channel)$",
+    re.IGNORECASE,
+)
+
+_PROVIDER_ALIASES = (
+    ("amazon prime video", "Prime Video"),
+    ("prime video", "Prime Video"),
+    ("disney plus", "Disney+"),
+    ("disney+", "Disney+"),
+    ("apple tv plus", "Apple TV+"),
+    ("apple tv+", "Apple TV+"),
+    ("apple tv", "Apple TV+"),
+    ("hbo max", "Max"),
+    ("max", "Max"),
+    ("paramount plus", "Paramount+"),
+    ("paramount+", "Paramount+"),
+    ("netflix", "Netflix"),
+    ("peacock", "Peacock"),
+    ("universal+", "Universal+"),
+    ("universal plus", "Universal+"),
+    ("claro video", "Claro Video"),
+    ("vix", "ViX"),
+    ("crunchyroll", "Crunchyroll"),
+    ("hulu", "Hulu"),
+)
+
+_GENRE_BUCKETS = {
+    "action": "Acción y Aventura",
+    "adventure": "Acción y Aventura",
+    "action & adventure": "Acción y Aventura",
+    "acción": "Acción y Aventura",
+    "aventura": "Acción y Aventura",
+    "acción y aventura": "Acción y Aventura",
+    "comedy": "Comedia",
+    "comedia": "Comedia",
+    "horror": "Terror y Suspenso",
+    "thriller": "Terror y Suspenso",
+    "mystery": "Terror y Suspenso",
+    "terror": "Terror y Suspenso",
+    "suspense": "Terror y Suspenso",
+    "suspenso": "Terror y Suspenso",
+    "misterio": "Terror y Suspenso",
+    "science fiction": "Ciencia Ficción y Fantasía",
+    "fantasy": "Ciencia Ficción y Fantasía",
+    "sci-fi & fantasy": "Ciencia Ficción y Fantasía",
+    "ciencia ficción": "Ciencia Ficción y Fantasía",
+    "fantasía": "Ciencia Ficción y Fantasía",
+    "scifi": "Ciencia Ficción y Fantasía",
+    "romance": "Romance",
+    "drama": "Drama y Crimen",
+    "crime": "Drama y Crimen",
+    "crimen": "Drama y Crimen",
+    "animation": "Animación y Familia",
+    "family": "Animación y Familia",
+    "kids": "Animación y Familia",
+    "animación": "Animación y Familia",
+    "familia": "Animación y Familia",
 }
 
-_PROVIDER_ALIASES = {
-    "netflix": "Netflix",
-    "amazon prime video": "Prime Video",
-    "prime video": "Prime Video",
-    "amazon video": "Prime Video",
-    "hotstar": "Hotstar",
-    "disney plus hotstar": "Hotstar",
-    "disney+ hotstar": "Hotstar",
-    "jiohotstar": "Hotstar",
-    "hulu": "Hulu",
-    "apple tv": "Apple TV",
-    "apple tv plus": "Apple TV",
-    "apple tv+": "Apple TV",
-    "hbo max": "HBO",
-    "max": "HBO",
-    "jio cinema": "JioCinema",
-    "jiocinema": "JioCinema",
-    "zee5": "ZEE5",
-    "sony liv": "SonyLIV",
-    "sonyliv": "SonyLIV",
-    "mx player": "MX Player",
-    "crunchyroll": "Crunchyroll",
-}
+_LATAM_COUNTRIES = {"MX", "AR", "CO", "CL", "PE", "ES", "VE", "UY", "PR", "DO", "EC", "GT", "CR", "PA"}
+_TRENDING_CACHE: Dict[str, Tuple[float, Set[int]]] = {}
+_TRENDING_TTL = 3600.0
 
 _auto_sync_lock = asyncio.Lock()
 _auto_sync_task: Optional[asyncio.Task] = None
@@ -115,10 +146,15 @@ def _doc_item(doc: dict) -> dict:
 
 
 def _provider_bucket(provider_name: str) -> Optional[str]:
-    value = (provider_name or "").strip().lower()
-    if not value:
+    raw = (provider_name or "").strip()
+    if not raw:
         return None
-    for needle, bucket in _PROVIDER_ALIASES.items():
+    prev = None
+    while prev != raw:
+        prev = raw
+        raw = _PROVIDER_SUFFIX_RE.sub("", raw).strip()
+    value = raw.lower()
+    for needle, bucket in _PROVIDER_ALIASES:
         if needle in value:
             return bucket
     return None
@@ -126,13 +162,14 @@ def _provider_bucket(provider_name: str) -> Optional[str]:
 
 def _extract_provider_names(watch_data: dict) -> List[str]:
     results = (watch_data or {}).get("results") or {}
-    region_data = results.get(AUTO_CATALOG_REGION) or results.get("US") or {}
     names: List[str] = []
-    for group in ["flatrate", "ads", "free", "rent", "buy"]:
-        for provider in region_data.get(group, []) or []:
-            name = provider.get("provider_name")
-            if name:
-                names.append(name)
+    for region_code in ("MX", "US"):
+        region_data = results.get(region_code) or {}
+        for group in ["flatrate", "ads", "free", "rent", "buy"]:
+            for provider in region_data.get(group, []) or []:
+                name = provider.get("provider_name")
+                if name and name not in names:
+                    names.append(name)
     return names
 
 
@@ -196,11 +233,19 @@ async def _enabled_catalog_names(db) -> Set[str]:
     return {CATALOG_BY_KEY[key]["name"] for key in keys if key in CATALOG_BY_KEY}
 
 
-def classify_media_from_tmdb(doc: dict, details: dict, watch_data: dict, enabled_names: Set[str]) -> dict:
+def classify_media_from_tmdb(
+    doc: dict,
+    details: dict,
+    watch_data: dict,
+    enabled_names: Set[str],
+    trending_movies: Optional[Set[int]] = None,
+    trending_tv: Optional[Set[int]] = None,
+) -> dict:
     tags: Set[str] = set()
     providers: Set[str] = set()
 
     media_type = _media_type(doc)
+    tmdb_id = doc.get("tmdb_id")
     original_language = details.get("original_language") or doc.get("original_language") or ""
 
     if doc.get("is_anime"):
@@ -213,35 +258,52 @@ def classify_media_from_tmdb(doc: dict, details: dict, watch_data: dict, enabled
         if c.get("iso_3166_1")
     ] or (doc.get("production_countries") or [])
 
-    for tag in _LANGUAGE_CATALOGS.get(original_language, []):
-        tags.add(tag)
-
-    if original_language == "hi" and ("IN" in origin_country or "IN" in production_countries or not origin_country):
-        tags.add("Bollywood")
+    all_countries = set(origin_country) | set(production_countries)
+    if original_language == "es" or (all_countries & _LATAM_COUNTRIES):
+        tags.add("Cine Latino y Mexicano")
 
     if original_language == "ko" and media_type == "tv":
         tags.add("K-Drama")
 
     genre_names = [g.get("name", "") for g in details.get("genres", []) or []]
-    genre_lower = {g.lower() for g in genre_names}
+    for g in (doc.get("genres") or []):
+        if isinstance(g, str) and g not in genre_names:
+            genre_names.append(g)
+    genre_lower = {g.strip().lower() for g in genre_names if g}
+
+    for g_low in genre_lower:
+        bucket = _GENRE_BUCKETS.get(g_low)
+        if bucket:
+            tags.add(bucket)
 
     keyword_payload = details.get("keywords") or {}
     keywords = keyword_payload.get("keywords") or keyword_payload.get("results") or []
     keyword_names = {k.get("name", "").lower() for k in keywords if isinstance(k, dict)}
 
-    if original_language == "ja" and ("animation" in genre_lower or "anime" in keyword_names):
+    if original_language == "ja" and ("animation" in genre_lower or "animación" in genre_lower or "anime" in keyword_names):
         tags.add("Anime")
 
     try:
-        if float(doc.get("rating") or 0) >= 7.5:
-            tags.add("Top Rated")
+        tid = int(tmdb_id) if tmdb_id is not None else None
+    except (TypeError, ValueError):
+        tid = None
+
+    if tid is not None:
+        if media_type == "movie" and trending_movies and tid in trending_movies:
+            tags.add("Top 100 Tendencias Películas")
+        elif media_type == "tv" and trending_tv and tid in trending_tv:
+            tags.add("Top 100 Tendencias Series")
+
+    try:
+        if float(doc.get("rating") or details.get("vote_average") or 0) >= 7.5:
+            tags.add("Mejor Calificadas")
     except Exception:
         pass
 
     if doc.get("release_year"):
         try:
             if int(doc.get("release_year")) >= datetime.utcnow().year - 1:
-                tags.add("Recently Added")
+                tags.add("Estrenos Recientes")
         except Exception:
             pass
 
@@ -253,8 +315,9 @@ def classify_media_from_tmdb(doc: dict, details: dict, watch_data: dict, enabled
                 providers.add(bucket)
     else:
         for stored in (doc.get("watch_providers") or []):
-            if stored:
-                providers.add(stored)
+            bucket = _provider_bucket(stored) or stored
+            if bucket:
+                providers.add(bucket)
 
     for bucket in providers:
         tags.add(bucket)
@@ -266,6 +329,36 @@ def classify_media_from_tmdb(doc: dict, details: dict, watch_data: dict, enabled
         "watch_providers": sorted(providers),
         "auto_tags": sorted(tags),
     }
+
+
+async def _fetch_trending_top100(client: httpx.AsyncClient, media_type: str) -> Set[int]:
+    now = time.time()
+    cached = _TRENDING_CACHE.get(media_type)
+    if cached and (now - cached[0]) < _TRENDING_TTL:
+        return cached[1]
+
+    api_key = tmdb_api_key()
+    if not api_key:
+        return set()
+
+    ids: Set[int] = set()
+    endpoint = "tv" if media_type == "tv" else "movie"
+    for page in range(1, 6):
+        try:
+            resp = await client.get(
+                f"https://api.themoviedb.org/3/trending/{endpoint}/week",
+                params={"api_key": api_key, "language": "es-MX", "page": page},
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("results") or []:
+                    if item.get("id"):
+                        ids.add(int(item["id"]))
+        except Exception as e:
+            LOGGER.warning(f"TMDB trending fetch failed ({endpoint} p{page}): {e}")
+
+    if ids:
+        _TRENDING_CACHE[media_type] = (now, ids)
+    return ids
 
 
 _TMDB_FIND_CACHE: dict = {}
@@ -369,11 +462,22 @@ async def _iter_all_media(db, *, force_refresh: bool = False):
                     yield collection_name, db_index, doc, False
 
 
-async def _classify_one(db, client: httpx.AsyncClient, semaphore: asyncio.Semaphore, doc: dict, enabled_names: Set[str]) -> tuple[dict, dict]:
+async def _classify_one(
+    db,
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    doc: dict,
+    enabled_names: Set[str],
+    trending_movies: Optional[Set[int]] = None,
+    trending_tv: Optional[Set[int]] = None,
+) -> tuple[dict, dict]:
     async with semaphore:
         try:
             details, watch_data = await asyncio.wait_for(_fetch_tmdb_data(client, doc), timeout=30)
-            classification = classify_media_from_tmdb(doc, details or {}, watch_data or {}, enabled_names)
+            classification = classify_media_from_tmdb(
+                doc, details or {}, watch_data or {}, enabled_names,
+                trending_movies=trending_movies, trending_tv=trending_tv,
+            )
 
             now = datetime.utcnow()
             update_data = {
@@ -436,7 +540,14 @@ async def sync_single_media(db, *, tmdb_id, media_type: str) -> dict:
     semaphore = asyncio.Semaphore(1)
     async with _instant_sync_semaphore:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            media_doc, classification = await _classify_one(db, client, semaphore, doc, enabled_names)
+            trending_movies, trending_tv = await asyncio.gather(
+                _fetch_trending_top100(client, "movie"),
+                _fetch_trending_top100(client, "tv"),
+            )
+            media_doc, classification = await _classify_one(
+                db, client, semaphore, doc, enabled_names,
+                trending_movies=trending_movies, trending_tv=trending_tv,
+            )
 
     tags = [] if media_doc.get("exclusive_catalog_id") else [
         tag for tag in (classification.get("auto_tags") or []) if tag in enabled_names
@@ -641,18 +752,38 @@ async def run_auto_catalog_sync(db, *, force: bool = False, force_refresh: bool 
             semaphore = asyncio.Semaphore(AUTO_SYNC_CONCURRENCY)
 
             async with httpx.AsyncClient(timeout=timeout, limits=limits, follow_redirects=True) as client:
+                trending_movies, trending_tv = await asyncio.gather(
+                    _fetch_trending_top100(client, "movie"),
+                    _fetch_trending_top100(client, "tv"),
+                )
                 pending = []
                 async for _, _, doc, already_synced in _iter_all_media(db, force_refresh=force_refresh):
                     scanned += 1
 
-                    #----- Already-tagged titles skip TMDB; reuse their stored tags
+                    #----- Already-tagged titles skip TMDB; reuse their stored tags (updating dynamic trending tags)
                     if already_synced:
                         skipped += 1
-                        collect(doc, doc.get("auto_tags") or [])
+                        stored_tags = [
+                            t for t in (doc.get("auto_tags") or [])
+                            if t not in ("Top 100 Tendencias Películas", "Top 100 Tendencias Series")
+                        ]
+                        try:
+                            tid = int(doc.get("tmdb_id"))
+                        except (TypeError, ValueError):
+                            tid = None
+                        if tid is not None:
+                            if _media_type(doc) == "movie" and tid in trending_movies:
+                                stored_tags.append("Top 100 Tendencias Películas")
+                            elif _media_type(doc) == "tv" and tid in trending_tv:
+                                stored_tags.append("Top 100 Tendencias Series")
+                        collect(doc, stored_tags)
                         continue
 
                     classified += 1
-                    pending.append(_classify_one(db, client, semaphore, doc, enabled_names))
+                    pending.append(_classify_one(
+                        db, client, semaphore, doc, enabled_names,
+                        trending_movies=trending_movies, trending_tv=trending_tv,
+                    ))
 
                     if len(pending) >= 40:
                         for media_doc, classification in await asyncio.gather(*pending):

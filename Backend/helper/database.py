@@ -1377,7 +1377,6 @@ class Database:
                 original_language=metadata_info.get('original_language'),
                 origin_country=metadata_info.get('origin_country', []) or [],
                 release_date=metadata_info.get('release_date') or None,
-                networks=metadata_info.get('networks') or [],
                 telegram=[quality_detail]
             )
             return await self.update_movie(media, status)
@@ -1404,7 +1403,6 @@ class Database:
                 is_anime=metadata_info.get('is_anime', False),
                 original_language=metadata_info.get('original_language'),
                 origin_country=metadata_info.get('origin_country', []) or [],
-                networks=metadata_info.get('networks') or [],
                 seasons=[Season(
                     season_number=metadata_info['season_number'],
                     episodes=[Episode(
@@ -2796,7 +2794,6 @@ class Database:
                 "backdrop": _pick("backdrop"),
                 "logo": _pick("logo"),
                 "genres": _pick("genres"),
-                "networks": _pick("networks"),
                 "cast": _pick("cast"),
                 "runtime": _pick("runtime"),
                 "media_type": "movie",
@@ -2815,7 +2812,6 @@ class Database:
                 "backdrop": _pick("backdrop"),
                 "logo": _pick("logo"),
                 "genres": _pick("genres"),
-                "networks": _pick("networks"),
                 "cast": _pick("cast"),
                 "runtime": _pick("runtime"),
                 "media_type": "tv",
@@ -2845,7 +2841,7 @@ class Database:
             for field in (
                 "tmdb_id", "imdb_id", "title", "release_year", "rating",
                 "description", "poster", "backdrop", "logo", "genres",
-                "networks", "cast", "runtime", "media_type",
+                "cast", "runtime", "media_type",
             ):
                 if field in current_doc:
                     existing_other[field] = current_doc[field]

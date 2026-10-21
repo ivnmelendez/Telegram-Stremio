@@ -32,66 +32,6 @@ from Backend.logger import LOGGER
 _tmdb_client: aioTMDb | None = None
 _tmdb_client_key: str | None = None
 
-#----- TMDB lists the same streaming service multiple times under different
-#----- "sold via X" reseller channels (ej. "Paramount Plus Apple TV channel",
-#----- "Paramount Plus Premium"). Strip those suffixes so categories don't
-#----- duplicate the same platform 2-3 times.
-_PROVIDER_SUFFIX_RE = re.compile(
-    r"\s+(Amazon Channel|Apple TV [Cc]hannel|Premium|Essential|Basic with Ads|Roku Premium Channel)$"
-)
-
-#----- TMDB's MX watch-provider names don't match our canonical display
-#----- labels (ej. "Amazon Prime Video" vs "Prime Video", "Netflix Standard
-#----- with Ads" vs "Netflix", "Paramount+" vs "Paramount Plus"). Substring
-#----- match (lowercased) -> canonical name, so every variant collapses onto
-#----- the same network instead of creating
-#----- duplicate network entries for the same platform.
-_PLATFORM_ALIASES = (
-    ("amazon prime video", "Prime Video"),
-    ("prime video", "Prime Video"),
-    ("disney plus", "Disney Plus"),
-    ("disney+", "Disney Plus"),
-    ("apple tv plus", "Apple TV"),
-    ("apple tv+", "Apple TV"),
-    ("apple tv", "Apple TV"),
-    ("hbo max", "HBO Max"),
-    ("paramount plus", "Paramount Plus"),
-    ("paramount+", "Paramount Plus"),
-    ("netflix", "Netflix"),
-    ("peacock", "Peacock"),
-    ("hulu", "Hulu"),
-    ("vix", "ViX"),
-    ("max", "HBO Max"),
-    ("mgm+", "MGM+"),
-    ("mgm plus", "MGM+"),
-    ("universal+", "Universal+"),
-    #----- Tiendas genericas de compra/renta (no son plataformas de
-    #----- suscripcion propias) - se agrupan bajo Apple TV en vez de crear
-    #----- una categoria suelta por cada una.
-    ("amazon video", "Apple TV"),
-    ("google play", "Apple TV"),
-    ("youtube", "Apple TV"),
-    ("fandango at home", "Apple TV"),
-)
-
-
-def _normalize_provider_name(name: str) -> str:
-    #----- Strip reseller-channel suffixes FIRST (ej. "Paramount Plus Apple TV
-    #----- Channel" means Paramount+ sold via Apple TV's channel marketplace,
-    #----- not Apple TV content) - otherwise the alias substring check below
-    #----- would match "apple tv" inside that string and misidentify it.
-    prev = None
-    while prev != name:
-        prev = name
-        name = _PROVIDER_SUFFIX_RE.sub("", name)
-    name = name.strip()
-
-    low = name.lower()
-    for needle, canonical in _PLATFORM_ALIASES:
-        if needle in low:
-            return canonical
-    return name
-
 
 def tmdb_api_key() -> str:
     try:
@@ -255,31 +195,6 @@ async def safe_search(title: str, type_: str, year: Optional[int] = None):
     return await cached_call(TMDB_SEARCH_CACHE, cache_key, "tmdb_search", _produce)
 
 
-#----- Streaming platform for a title: subscription (flatrate) first, falling
-#----- back to buy/rent (ej. peliculas nuevas que solo estan en renta/compra,
-#----- no en ningun servicio de suscripcion todavia). MX first, US fallback
-#----- when TMDB has no MX licensing data at all (ej. producciones no-US).
-async def _fetch_networks(target, item_id) -> list:
-    try:
-        wp = await target.watch_providers()
-        results = wp.results or {} if wp else {}
-        region = results.get("MX") or results.get("US")
-        if not region:
-            return []
-        for bucket in (region.flatrate, getattr(region, "buy", None), getattr(region, "rent", None)):
-            seen: list[str] = []
-            for p in (bucket or []):
-                norm = _normalize_provider_name(p.provider_name)
-                if norm and norm not in seen:
-                    seen.append(norm)
-            if seen:
-                return seen
-        return []
-    except Exception as e:
-        LOGGER.warning(f"TMDb watch_providers fetch failed for id={item_id}: {e}")
-        return []
-
-
 async def details(media_type: str, item_id):
     cache_key = (media_type, item_id)
 
@@ -290,11 +205,6 @@ async def details(media_type: str, item_id):
                 target = client.movie(item_id) if media_type == "movie" else client.tv(item_id)
                 det = await target.details(append_to_response="external_ids,credits")
                 det.images = await target.images()
-                #----- det.networks (canal original, ej. "Comedy Central") no sirve para
-                #----- saber donde ver HOY. Lo pisamos con el proveedor de streaming real
-                #----- (ej. "Paramount Plus", o "Apple TV" si solo esta en renta/compra).
-                async with API_SEMAPHORE:
-                    det.networks = await _fetch_networks(target, item_id)
             return det
         except Exception as e:
             LOGGER.warning(f"TMDb {media_type} details fetch failed for id={item_id}: {e}")
@@ -365,7 +275,6 @@ def build_movie_payload(movie, quality, encoded_string) -> dict:
         "runtime": str(format_runtime(getattr(movie, "runtime", None))),
         "media_type": "movie",
         "genres": [g.name for g in (movie.genres or [])],
-        "networks": list(getattr(movie, "networks", None) or []),
         "original_language": getattr(movie, "original_language", None),
         "origin_country": _tmdb_country_codes(movie),
         "quality": quality,
@@ -402,7 +311,6 @@ def build_tv_payload(tv, ep, season, episode, quality, encoded_string) -> dict:
             getattr(getattr(tv, "external_ids", None), "imdb_id", None)
         ),
         "genres": [g.name for g in (tv.genres or [])],
-        "networks": list(getattr(tv, "networks", None) or []),
         "media_type": "tv",
         "cast": _extract_cast(tv),
         "runtime": str(runtime),

@@ -62,7 +62,6 @@ class TVShowSchema(BaseModel):
     origin_country: Optional[List[str]] = Field(default_factory=list)
     production_countries: Optional[List[str]] = Field(default_factory=list)
     watch_providers: Optional[List[str]] = Field(default_factory=list)
-    networks: Optional[List[str]] = Field(default_factory=list)
     auto_tags: Optional[List[str]] = Field(default_factory=list)
     auto_catalog: Optional[dict] = None
 
@@ -81,7 +80,6 @@ class MovieSchema(BaseModel):
     release_year: Optional[int] = None
     release_year_end: Optional[int] = None
     release_date: Optional[str] = None
-    networks: Optional[List[str]] = Field(default_factory=list)
     poster: Optional[str] = None
     backdrop: Optional[str] = None
     logo: Optional[str] = None
