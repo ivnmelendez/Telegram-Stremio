@@ -25,8 +25,8 @@ AUTO_CATALOG_DEFINITIONS = [
     {"key": "kdrama", "name": "K-Drama", "group": "Categorías"},
     {"key": "latino_mexicano", "name": "Cine Latino y Mexicano", "group": "Categorías"},
 
-    {"key": "trending_movies", "name": "Top 100 Tendencias Películas", "group": "Smart"},
-    {"key": "trending_tv", "name": "Top 100 Tendencias Series", "group": "Smart"},
+    {"key": "trending_movies", "name": "Películas en Tendencia", "group": "Smart"},
+    {"key": "trending_tv", "name": "Series en Tendencia", "group": "Smart"},
     {"key": "top_rated", "name": "Mejor Calificadas", "group": "Smart"},
     {"key": "recently_added", "name": "Estrenos Recientes", "group": "Smart"},
 
@@ -290,9 +290,9 @@ def classify_media_from_tmdb(
 
     if tid is not None:
         if media_type == "movie" and trending_movies and tid in trending_movies:
-            tags.add("Top 100 Tendencias Películas")
+            tags.add("Películas en Tendencia")
         elif media_type == "tv" and trending_tv and tid in trending_tv:
-            tags.add("Top 100 Tendencias Series")
+            tags.add("Series en Tendencia")
 
     try:
         if float(doc.get("rating") or details.get("vote_average") or 0) >= 7.5:
@@ -765,7 +765,8 @@ async def run_auto_catalog_sync(db, *, force: bool = False, force_refresh: bool 
                         skipped += 1
                         stored_tags = [
                             t for t in (doc.get("auto_tags") or [])
-                            if t not in ("Top 100 Tendencias Películas", "Top 100 Tendencias Series")
+                            if t not in ("Top 100 Tendencias Películas", "Top 100 Tendencias Series",
+                                         "Películas en Tendencia", "Series en Tendencia")
                         ]
                         try:
                             tid = int(doc.get("tmdb_id"))
@@ -773,9 +774,9 @@ async def run_auto_catalog_sync(db, *, force: bool = False, force_refresh: bool 
                             tid = None
                         if tid is not None:
                             if _media_type(doc) == "movie" and tid in trending_movies:
-                                stored_tags.append("Top 100 Tendencias Películas")
+                                stored_tags.append("Películas en Tendencia")
                             elif _media_type(doc) == "tv" and tid in trending_tv:
-                                stored_tags.append("Top 100 Tendencias Series")
+                                stored_tags.append("Series en Tendencia")
                         collect(doc, stored_tags)
                         continue
 
