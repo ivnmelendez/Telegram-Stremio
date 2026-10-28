@@ -459,14 +459,22 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
                     continue
                 catalog_id = str(catalog.get("_id"))
                 catalog_name = catalog.get("name") or "Custom Catalog"
-                cat_type = "series" if (has_series and not has_movie) else "movie"
-                catalogs.append({
-                    "type": cat_type,
-                    "id": f"custom_{catalog_id}",
-                    "name": catalog_name,
-                    "extra": [{"name": "skip"}],
-                    "extraSupported": ["skip"],
-                })
+                if has_movie:
+                    catalogs.append({
+                        "type": "movie",
+                        "id": f"custom_{catalog_id}",
+                        "name": catalog_name,
+                        "extra": [{"name": "skip"}],
+                        "extraSupported": ["skip"],
+                    })
+                if has_series:
+                    catalogs.append({
+                        "type": "series",
+                        "id": f"custom_{catalog_id}",
+                        "name": catalog_name,
+                        "extra": [{"name": "skip"}],
+                        "extraSupported": ["skip"],
+                    })
         except Exception:
             pass
 
@@ -578,9 +586,11 @@ async def get_catalog(token: str, media_type: str, id: str, extra: Optional[str]
             if not catalog:
                 return {"metas": []}
 
+            db_media_type = "tv" if media_type == "series" else "movie"
             visible_items = [
                 it for it in (catalog.get("items") or [])
-                if _token_can_view(*_effective_visibility(catalog, it), token_data)
+                if it.get("media_type") == db_media_type
+                and _token_can_view(*_effective_visibility(catalog, it), token_data)
             ]
             visible_items.sort(key=lambda it: it.get("updated_on") or it.get("added_at") or datetime.min, reverse=True)
             start = (page - 1) * PAGE_SIZE
@@ -1257,10 +1267,10 @@ async def _addon_catalogs_for_token(token_data: dict) -> list:
             if not items:
                 continue
             cid, name = f"custom_{c['_id']}", (c.get("name") or "Catalog")
-            has_movie = any(i.get("media_type") == "movie" for i in items)
-            has_series = any(i.get("media_type") == "tv" for i in items)
-            cat_type = "series" if (has_series and not has_movie) else "movie"
-            entries.append({"id": cid, "name": name, "type": cat_type})
+            if any(i.get("media_type") == "movie" for i in items):
+                entries.append({"id": cid, "name": name, "type": "movie"})
+            if any(i.get("media_type") == "tv" for i in items):
+                entries.append({"id": cid, "name": name, "type": "series"})
     except Exception:
         pass
     for e in entries:

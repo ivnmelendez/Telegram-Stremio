@@ -1725,8 +1725,10 @@ async def get_catalog_order_api():
             group = "Auto" if c.get("auto") else "Custom"
             has_movie = any(i.get("media_type") == "movie" for i in items)
             has_series = any(i.get("media_type") == "tv" for i in items)
-            cat_type = "series" if (has_series and not has_movie) else "movie"
-            entries.append({"id": cid, "name": name, "group": group, "type": cat_type})
+            if has_movie or not items:
+                entries.append({"id": cid, "name": name, "group": group, "type": "movie"})
+            if has_series:
+                entries.append({"id": cid, "name": name, "group": group, "type": "series"})
         for e in entries:
             e["key"] = f"{e['id']}::{e['type']}"
         order = await db.get_catalog_order()
