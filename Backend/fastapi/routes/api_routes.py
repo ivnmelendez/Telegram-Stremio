@@ -898,6 +898,7 @@ async def get_all_tokens_api() -> dict:
                     f"{SettingsManager.current().base_url}/stremio/{token_str}/manifest.json"
                     if token_str else None
                 ),
+                "app_code": token_doc.get("app_code"),
             }
 
         seen_user_ids = set()

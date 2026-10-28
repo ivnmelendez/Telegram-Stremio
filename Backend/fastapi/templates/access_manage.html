@@ -423,8 +423,22 @@
             </div>`;
         }
         return t.addon_url
-            ? `<div class="addon-box"><button onclick="copyLink('${escHtml(t.addon_url)}')" class="glass-btn glass-btn-primary rounded-xl px-3 py-2 text-xs font-bold inline-flex items-center gap-2"><i class="fas fa-copy"></i> Copy Install Link</button></div>`
+            ? `<div class="addon-box"><button onclick="copyLink('${escHtml(t.addon_url)}')" class="glass-btn glass-btn-primary rounded-xl px-3 py-2 text-xs font-bold inline-flex items-center gap-2"><i class="fas fa-copy"></i> Copy Install Link</button>${appCodeHtml(t)}</div>`
             : `<div class="addon-box text-soft text-xs">—</div>`;
+    }
+
+    //----- The code a person types in the Nuvio app on first launch (see routes/app_code_routes.py)
+    function appCodeHtml(t) {
+        if (!t.token) return '';
+        const token = escHtml(t.token);
+        if (!t.app_code) {
+            return `<button onclick="newAppCode('${token}', false)" class="mt-2 text-xs font-semibold underline opacity-70 hover:opacity-100 transition">Get app code</button>`;
+        }
+        return `<div class="mt-2 flex items-center gap-2 text-xs">
+            <span class="text-soft">App code</span>
+            <button onclick="copyAppCode('${escHtml(t.app_code)}')" title="Copy" class="font-mono font-bold tracking-widest text-sm">${escHtml(t.app_code)}</button>
+            <button onclick="newAppCode('${token}', true)" title="Replace this code" class="opacity-60 hover:opacity-100 transition"><i class="fas fa-rotate"></i></button>
+        </div>`;
     }
 
     function usageHtml(t) {
@@ -758,6 +772,22 @@
             if (resp.ok) { showToast('Updated.', 'success', 'Updated'); closeModal('sub-action-modal'); loadTokens(); }
             else { showToast(data.detail || 'Failed.', 'error', 'Update Failed'); }
         } catch (err) { showToast('Error: ' + err.message, 'error', 'Network Error'); }
+    }
+
+    async function copyAppCode(code) {
+        try { await navigator.clipboard.writeText(code); showToast('Code copied!', 'success', 'Copied'); }
+        catch { prompt('Copy this code:', code); }
+    }
+
+    async function newAppCode(token, replacing) {
+        if (replacing && !confirm('Replace this code? The old one stops working.')) return;
+        try {
+            const resp = await fetch('/api/app-codes/' + encodeURIComponent(token) + '/reset', { method: 'POST' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            await loadTokens();
+        } catch (e) {
+            showToast('Could not create the code', 'error', 'Error');
+        }
     }
 
     async function copyLink(url) {
