@@ -446,6 +446,24 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
         except Exception:
             pass
 
+        # Search-only catalogs, added after the overrides so a hidden "Popular" row never takes search away from the app.
+        catalogs.extend([
+            {
+                "type": "movie",
+                "id": "search_movies",
+                "name": "Search",
+                "extra": [{"name": "search", "isRequired": True}],
+                "extraSupported": ["search"]
+            },
+            {
+                "type": "series",
+                "id": "search_series",
+                "name": "Search",
+                "extra": [{"name": "search", "isRequired": True}],
+                "extraSupported": ["search"]
+            }
+        ])
+
         try:
             custom_catalogs = await db.get_custom_catalogs()
             for catalog in custom_catalogs:
