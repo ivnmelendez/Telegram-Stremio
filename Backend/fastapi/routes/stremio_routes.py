@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -34,6 +35,13 @@ templates = Jinja2Templates(directory="Backend/fastapi/templates")
 #----- Addon configuration
 ADDON_NAME = "Nube Latino"
 ADDON_VERSION = __version__
+
+# The rows file the TV app should use for Home when this addon is installed: titles taken from this library, so every
+# card has a source. The app reads it from the manifest's behaviorHints (homeConfigUrl); other addons have none.
+HOME_CONFIG_URL = os.getenv(
+    "HOME_CONFIG_URL",
+    "https://raw.githubusercontent.com/ivnmelendez/nuvio-config/main/home-config.json",
+).strip()
 PAGE_SIZE = 15
 
 def _donation():
@@ -553,7 +561,8 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
         "idPrefixes": ["tt", "tg", "kitsu"],
         "behaviorHints": {
             "configurable": True,
-            "configurationRequired": False
+            "configurationRequired": False,
+            **({"homeConfigUrl": HOME_CONFIG_URL} if HOME_CONFIG_URL else {}),
         },
         "config": [
             {
