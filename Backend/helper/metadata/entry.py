@@ -228,6 +228,7 @@ async def metadata(
             result["group_key"] = group_key
             result["part_number"] = part_number
         if result:
+            await tmdb.ensure_tmdb_logo(result)
             ensure_media_ids(result, seed=str(result.get("title") or ""))
         return result
     except Exception as e:

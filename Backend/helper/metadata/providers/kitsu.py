@@ -13,7 +13,6 @@ from Backend.helper.metadata.common import (
     KITSU_CACHE,
     KITSU_THRESHOLD,
     cached_call,
-    logo_from_imdb,
     normalize_rating,
     parse_year_range,
     strip_html,
@@ -220,7 +219,7 @@ def _common_payload(row: dict, doc: dict, title: str) -> dict:
         or title
     )
     display = english or original or title
-    logo = _anizip_image(images, "Clearlogo") or logo_from_imdb(imdb_id)
+    logo = ""
     payload = {
         "tmdb_id": tmdb_id,
         "imdb_id": imdb_id,

@@ -19,7 +19,6 @@ from Backend.helper.metadata.common import (
     TVDB_THRESHOLD,
     cached_call,
     format_imdb_images,
-    logo_from_imdb,
     normalize_rating,
     parse_year_range,
     score_candidate_aliases,
@@ -469,7 +468,7 @@ async def build_series_payload(
         or _art_url(series.get("background") or "")
         or imdb_images["backdrop"]
     )
-    logo = _pick_artwork(artworks, {25, 23}) or logo_from_imdb(imdb_id)
+    logo = ""
     year, year_end = parse_year_range(
         series.get("firstAired") or series.get("year"),
         series.get("lastAired") or series.get("nextAired"),
@@ -534,7 +533,7 @@ async def build_movie_payload(movie: dict, quality, encoded_string) -> dict:
         or imdb_images["poster"]
     )
     backdrop = _pick_artwork(artworks, {15, 3}) or imdb_images["backdrop"]
-    logo = _pick_artwork(artworks, {25, 23}) or logo_from_imdb(imdb_id)
+    logo = ""
     year, year_end = parse_year_range(movie.get("year") or movie.get("releaseDate"), None)
     rate = normalize_rating(
         movie.get("siteRating")

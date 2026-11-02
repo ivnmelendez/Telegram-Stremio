@@ -229,8 +229,6 @@ async def _apply_fanart(meta: dict, item: dict) -> None:
         return
     if art.get("poster"):
         meta["poster"] = art["poster"]
-    if art.get("logo"):
-        meta["logo"] = art["logo"]
     if art.get("background"):
         meta["background"] = art["background"]
 

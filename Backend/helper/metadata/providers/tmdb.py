@@ -5,12 +5,13 @@ from typing import Optional
 
 import re
 
+import httpx
+
 from themoviedb import aioTMDb
 
 from Backend.config import Telegram
 from Backend.helper.metadata.common import (
     ensure_media_ids,
-    logo_from_imdb,
     parse_year_range,
     ALT_TITLE_LOOKUPS,
     ALT_TITLES_CACHE,
@@ -31,6 +32,8 @@ from Backend.logger import LOGGER
 
 _tmdb_client: aioTMDb | None = None
 _tmdb_client_key: str | None = None
+_tmdb_en_client: aioTMDb | None = None
+_tmdb_en_client_key: str | None = None
 
 
 def tmdb_api_key() -> str:
@@ -52,17 +55,68 @@ def get_tmdb_client() -> aioTMDb:
     return _tmdb_client
 
 
+def _english_client() -> aioTMDb:
+    global _tmdb_en_client, _tmdb_en_client_key
+    current_key = tmdb_api_key()
+    if _tmdb_en_client is None or _tmdb_en_client_key != current_key:
+        _tmdb_en_client = aioTMDb(key=current_key, language="en-US")
+        _tmdb_en_client_key = current_key
+    return _tmdb_en_client
+
+
 def get_tmdb_logo(images) -> str:
     logos = getattr(images, "logos", None) if images else None
     if not logos:
         return ""
-    for logo in logos:
-        if getattr(logo, "iso_639_1", None) == "en" and getattr(logo, "file_path", None):
-            return format_tmdb_image(logo.file_path, "w300")
+    for lang in ("es", "en"):
+        for logo in logos:
+            if getattr(logo, "iso_639_1", None) == lang and getattr(logo, "file_path", None):
+                return format_tmdb_image(logo.file_path, "w300")
     for logo in logos:
         if getattr(logo, "file_path", None):
             return format_tmdb_image(logo.file_path, "w300")
     return ""
+
+
+_FIND_URL = "https://api.themoviedb.org/3/find/{imdb_id}"
+_TMDB_CDN = "https://image.tmdb.org/"
+
+
+async def _tmdb_id_from_imdb(imdb_id: str, media_type: str):
+    key = tmdb_api_key()
+    if not key or not imdb_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as http:
+            r = await http.get(
+                _FIND_URL.format(imdb_id=imdb_id),
+                params={"api_key": key, "external_source": "imdb_id"},
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        LOGGER.warning(f"TMDb find failed for {imdb_id}: {e}")
+        return None
+    results = data.get("movie_results" if media_type == "movie" else "tv_results") or []
+    return results[0].get("id") if results else None
+
+
+async def ensure_tmdb_logo(payload: dict) -> None:
+    """Force payload['logo'] to a TMDB CDN link (es, then en); empty if TMDB has none."""
+    if not payload or not tmdb_api_key():
+        return
+    current = payload.get("logo") or ""
+    if current.startswith(_TMDB_CDN):
+        return
+    media_type = "movie" if payload.get("media_type") == "movie" else "tv"
+    tmdb_id = await _tmdb_id_from_imdb(payload.get("imdb_id"), media_type) or (
+        payload.get("tmdb_id") if not payload.get("imdb_id") else None
+    )
+    if not tmdb_id:
+        payload["logo"] = ""
+        return
+    det = await details(media_type, tmdb_id)
+    payload["logo"] = get_tmdb_logo(getattr(det, "images", None)) if det else ""
 
 
 def _extract_cast(details) -> list:
@@ -204,7 +258,14 @@ async def details(media_type: str, item_id):
             async with API_SEMAPHORE:
                 target = client.movie(item_id) if media_type == "movie" else client.tv(item_id)
                 det = await target.details(append_to_response="external_ids,credits")
-                det.images = await target.images()
+                if media_type == "movie":
+                    det.images = await target.images(include_image_language="es,en,null")
+                else:
+                    det.images = await target.images()
+                    logos = getattr(det.images, "logos", None) or []
+                    if not any(getattr(l, "iso_639_1", None) == "es" for l in logos):
+                        en_images = await _english_client().tv(item_id).images()
+                        det.images.logos = list(logos) + list(getattr(en_images, "logos", None) or [])
             return det
         except Exception as e:
             LOGGER.warning(f"TMDb {media_type} details fetch failed for id={item_id}: {e}")
@@ -268,9 +329,7 @@ def build_movie_payload(movie, quality, encoded_string) -> dict:
         "description": movie.overview or "",
         "poster": format_tmdb_image(movie.poster_path),
         "backdrop": format_tmdb_image(movie.backdrop_path, "original"),
-        "logo": get_tmdb_logo(getattr(movie, "images", None)) or logo_from_imdb(
-            getattr(getattr(movie, "external_ids", None), "imdb_id", None)
-        ),
+        "logo": get_tmdb_logo(getattr(movie, "images", None)),
         "cast": _extract_cast(movie),
         "runtime": str(format_runtime(getattr(movie, "runtime", None))),
         "media_type": "movie",
@@ -307,9 +366,7 @@ def build_tv_payload(tv, ep, season, episode, quality, encoded_string) -> dict:
         "description": tv.overview or "",
         "poster": format_tmdb_image(tv.poster_path),
         "backdrop": format_tmdb_image(tv.backdrop_path, "original"),
-        "logo": get_tmdb_logo(getattr(tv, "images", None)) or logo_from_imdb(
-            getattr(getattr(tv, "external_ids", None), "imdb_id", None)
-        ),
+        "logo": get_tmdb_logo(getattr(tv, "images", None)),
         "genres": [g.name for g in (tv.genres or [])],
         "media_type": "tv",
         "cast": _extract_cast(tv),
