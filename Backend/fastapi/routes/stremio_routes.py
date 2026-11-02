@@ -42,6 +42,7 @@ HOME_CONFIG_URL = os.getenv(
     "HOME_CONFIG_URL",
     "https://raw.githubusercontent.com/ivnmelendez/nuvio-config/main/home-config.json",
 ).strip()
+APP_LANGUAGE = os.getenv("APP_LANGUAGE", "es-419").strip()
 PAGE_SIZE = 15
 
 def _donation():
@@ -563,6 +564,9 @@ async def get_manifest(token: str, token_data: dict = Depends(verify_token)):
             "configurable": True,
             "configurationRequired": False,
             **({"homeConfigUrl": HOME_CONFIG_URL} if HOME_CONFIG_URL else {}),
+            # Asks the TV app to use this language, and to set aside its default metadata-only addon, while this one is on.
+            **({"preferredLanguage": APP_LANGUAGE} if APP_LANGUAGE else {}),
+            "replacesDefaultAddons": True,
         },
         "config": [
             {
